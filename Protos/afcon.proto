@@ -44,6 +44,13 @@ service AFCONService {
 
   // Sync fixtures from API to database (admin operation)
   rpc SyncFixtures(SyncFixturesRequest) returns (SyncFixturesResponse);
+
+  // Push Notification Management
+  rpc RegisterDevice(RegisterDeviceRequest) returns (RegisterDeviceResponse);
+  rpc UpdateSubscriptions(UpdateSubscriptionsRequest) returns (UpdateSubscriptionsResponse);
+  rpc GetSubscriptions(GetSubscriptionsRequest) returns (GetSubscriptionsResponse);
+  rpc UnregisterDevice(UnregisterDeviceRequest) returns (UnregisterDeviceResponse);
+  rpc UpdateDeviceToken(UpdateDeviceTokenRequest) returns (UpdateDeviceTokenResponse);
 }
 
 // League Request/Response
@@ -427,4 +434,85 @@ message SyncFixturesResponse {
   bool success = 1;
   int32 fixtures_synced = 2;
   string message = 3;
+}
+
+// ============================================================================
+// Push Notification Messages
+// ============================================================================
+
+// Device Registration
+message RegisterDeviceRequest {
+  string user_id = 1;
+  string device_token = 2;
+  string platform = 3;  // "ios" or "android"
+  string device_id = 4;
+  string app_version = 5;
+  string os_version = 6;
+  string language = 7;
+  string timezone = 8;
+}
+
+message RegisterDeviceResponse {
+  bool success = 1;
+  string device_uuid = 2;  // UUID assigned by server
+  string message = 3;
+}
+
+// Update Device Token (for token refresh)
+message UpdateDeviceTokenRequest {
+  string device_uuid = 1;
+  string new_device_token = 2;
+}
+
+message UpdateDeviceTokenResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Subscription Management
+message UpdateSubscriptionsRequest {
+  string device_uuid = 1;
+  repeated Subscription subscriptions = 2;
+}
+
+message Subscription {
+  int32 league_id = 1;
+  int32 season = 2;
+  int32 team_id = 3;  // 0 = all teams in league
+  NotificationPreferences preferences = 4;
+}
+
+message NotificationPreferences {
+  bool notify_goals = 1;
+  bool notify_match_start = 2;
+  bool notify_match_end = 3;
+  bool notify_red_cards = 4;
+  bool notify_lineups = 5;
+  bool notify_var = 6;
+  int32 match_start_minutes_before = 7;  // 5, 10, 15, 30, 60
+}
+
+message UpdateSubscriptionsResponse {
+  bool success = 1;
+  int32 subscriptions_updated = 2;
+  string message = 3;
+}
+
+// Get Subscriptions
+message GetSubscriptionsRequest {
+  string device_uuid = 1;
+}
+
+message GetSubscriptionsResponse {
+  repeated Subscription subscriptions = 1;
+}
+
+// Unregister Device
+message UnregisterDeviceRequest {
+  string device_uuid = 1;
+}
+
+message UnregisterDeviceResponse {
+  bool success = 1;
+  string message = 2;
 }

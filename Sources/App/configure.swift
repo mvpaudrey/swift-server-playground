@@ -1,6 +1,5 @@
 import Vapor
-import GRPC
-import NIO
+import GRPCCore
 import Fluent
 import FluentPostgresDriver
 
@@ -49,6 +48,9 @@ public func configure(_ app: Application) async throws {
     // Migrations
     app.migrations.add(CreateLeagueEntity())
     app.migrations.add(CreateFixtureEntity())
+    app.migrations.add(CreateDeviceRegistrationEntity())
+    app.migrations.add(CreateNotificationSubscriptionEntity())
+    app.migrations.add(CreateNotificationHistoryEntity())
 
     // Run migrations on boot
     try await app.autoMigrate()
@@ -68,6 +70,27 @@ public func configure(_ app: Application) async throws {
     app.services.use { app -> CacheService in
         CacheService(logger: app.logger)
     }
+
+    // Register Device Repository
+    app.services.use { app -> DeviceRepository in
+        guard let db = app.db as? Database else {
+            fatalError("Database not configured")
+        }
+        return DeviceRepository(db: db, logger: app.logger)
+    }
+
+    // Register Notification Service
+    // TODO: NotificationService needs APNSwift v5+ migration - temporarily disabled
+    // app.services.use { app -> NotificationService in
+    //     guard let db = app.db as? Database else {
+    //         fatalError("Database not configured")
+    //     }
+    //     do {
+    //         return try await NotificationService(db: db, logger: app.logger, app: app)
+    //     } catch {
+    //         fatalError("Failed to initialize NotificationService: \(error)")
+    //     }
+    // }
 
     // MARK: - HTTP Routes (Optional REST API for debugging)
 
@@ -99,7 +122,7 @@ final class ServiceContainer {
     }
 }
 
-private var serviceContainer = ServiceContainer()
+private nonisolated(unsafe) var serviceContainer = ServiceContainer()
 
 extension Application.Services {
     func use<T>(_ factory: @escaping (Application) -> T) {

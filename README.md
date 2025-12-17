@@ -1,6 +1,14 @@
 # AFCON Middleware - gRPC API for African Cup of Nations
 
-A high-performance middleware built with **Vapor (Swift)** that fetches data from the **API-Football REST API** and exposes it via **gRPC** for real-time football match data streaming.
+A high-performance middleware built with **Vapor (Swift 6.2)** that fetches data from the **API-Football REST API** and exposes it via **gRPC** for real-time football match data streaming.
+
+## ⚡ Requirements
+
+- **Swift 6.0+** (tested with Swift 6.2)
+- **macOS 15.0+** (Sequoia) or **iOS 18.0+**
+- **grpc-swift 2.x** with native async/await support
+- PostgreSQL 15+
+- Redis 7+
 
 ## 📦 What's Inside This Project?
 

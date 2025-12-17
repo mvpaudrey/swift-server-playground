@@ -2,11 +2,11 @@ import Foundation
 import Vapor
 import Fluent
 
-final class FixtureEntity: Model, Content {
-    static let schema = "fixtures"
+public final class FixtureEntity: Model, Content, @unchecked Sendable {
+    public static let schema = "fixtures"
 
     @ID(key: .id)
-    var id: UUID?
+    public var id: UUID?
 
     // External API fixture identifier (unique)
     @Field(key: "api_fixture_id")
@@ -115,7 +115,7 @@ final class FixtureEntity: Model, Content {
     @Timestamp(key: "updated_at", on: .update)
     var updatedAt: Date?
 
-    init() {}
+    public init() {}
 
     init(
         id: UUID? = nil,

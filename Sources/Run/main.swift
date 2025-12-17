@@ -1,6 +1,6 @@
 import Vapor
-import GRPC
-import NIO
+import GRPCCore
+import GRPCNIOTransportHTTP2
 import Fluent
 import App
 
@@ -13,8 +13,7 @@ struct Main {
         var env = try Environment.detect()
         try LoggingSystem.bootstrap(from: &env)
 
-        let app = Application(env)
-        defer { app.shutdown() }
+        let app = try await Application.make(env)
 
         // Configure Vapor application
         try await App.configure(app)
@@ -27,45 +26,45 @@ struct Main {
         app.logger.info("📡 HTTP Server will run on port \(httpPort)")
         app.logger.info("📡 gRPC Server will run on port \(grpcPort)")
 
-        // Create event loop group for gRPC
-        let group = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount)
-        defer {
-            try? group.syncShutdownGracefully()
-        }
-
-        // Start gRPC server in the background
-        let grpcServer = try await startGRPCServer(
-            port: grpcPort,
-            eventLoopGroup: group,
-            app: app
-        )
-
-        app.logger.info("✅ gRPC Server started on port \(grpcPort)")
-
-        // Run Vapor HTTP server (this blocks)
         app.http.server.configuration.port = httpPort
-        try app.run()
 
-        // Shutdown gRPC server when Vapor stops
-        grpcServer.initiateGracefulShutdown().whenComplete { _ in
-            app.logger.info("✅ gRPC Server shut down gracefully")
+        // Run both servers concurrently
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            // Start Vapor HTTP server
+            group.addTask {
+                try await app.execute()
+            }
+
+            // Start gRPC server
+            group.addTask {
+                try await startGRPCServer(port: grpcPort, app: app)
+            }
+
+            // Wait for any task to complete or throw
+            try await group.next()
+
+            // Cancel remaining tasks
+            group.cancelAll()
+
+            app.logger.info("✅ Servers shut down")
         }
+
+        try await app.asyncShutdown()
     }
 
-    /// Start the gRPC server
+    /// Start the gRPC server using grpc-swift 2.x
     static func startGRPCServer(
         port: Int,
-        eventLoopGroup: EventLoopGroup,
         app: Application
-    ) async throws -> GRPC.Server {
+    ) async throws {
         // Get services from Vapor app
         let apiClient: APIFootballClient = app.getService()
         let cache: CacheService = app.getService()
+        // let notificationService: NotificationService = app.getService() // Disabled for Swift 6 migration
+        let deviceRepository: DeviceRepository = app.getService()
 
         // Create FixtureRepository with database connection
-        guard let db = app.db as? Database else {
-            fatalError("Database not configured")
-        }
+        let db: any Database = app.db
         let fixtureRepository = FixtureRepository(db: db, logger: app.logger)
 
         // Create gRPC service provider
@@ -73,6 +72,8 @@ struct Main {
             apiClient: apiClient,
             cache: cache,
             fixtureRepository: fixtureRepository,
+            notificationService: nil, // TODO: Re-enable after APNSwift migration
+            deviceRepository: deviceRepository,
             logger: app.logger
         )
 
@@ -86,15 +87,21 @@ struct Main {
         let leagues = parseInitLeaguesFromEnvironment(logger: app.logger)
         await serviceProvider.initializeFixtures(leagues: leagues)
 
-        // Configure gRPC server
-        let server = try await GRPC.Server.insecure(group: eventLoopGroup)
-            .withServiceProviders([serviceProvider])
-            .bind(host: "0.0.0.0", port: port)
-            .get()
+        // Configure gRPC server with grpc-swift 2.x API
+        let server = GRPCServer(
+            transport: .http2NIOPosix(
+                address: .ipv4(host: "0.0.0.0", port: port),
+                transportSecurity: .plaintext
+            ),
+            services: [serviceProvider]
+        )
 
-        app.logger.info("gRPC server started on 0.0.0.0:\(port)")
+        app.logger.info("gRPC server starting on 0.0.0.0:\(port)")
 
-        return server
+        // Run the server (this blocks until shutdown)
+        try await server.serve()
+
+        app.logger.info("gRPC server shut down gracefully")
     }
 
     /// Parse initialization leagues from environment variables

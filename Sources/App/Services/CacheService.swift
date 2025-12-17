@@ -3,9 +3,8 @@ import Vapor
 
 /// Simplified cache service using in-memory caching
 /// For production, integrate with Redis or another caching solution
-public final class CacheService {
+public actor CacheService {
     private var cache: [String: CacheEntry] = [:]
-    private let lock = NSLock()
     private let logger: Logger
 
     struct CacheEntry {
@@ -33,9 +32,6 @@ public final class CacheService {
     // MARK: - Generic Cache Methods
 
     func get<T: Codable>(key: String) async throws -> T? {
-        lock.lock()
-        defer { lock.unlock() }
-
         guard let entry = cache[key] else {
             logger.debug("Cache miss for key: \(key)")
             return nil
@@ -56,44 +52,34 @@ public final class CacheService {
     func set<T: Codable>(key: String, value: T, ttl: Int) async throws {
         let data = try JSONEncoder().encode(value)
         let expiry = Date().addingTimeInterval(TimeInterval(ttl))
-
-        lock.lock()
         cache[key] = CacheEntry(data: data, expiry: expiry)
-        lock.unlock()
-
         logger.debug("Cached value for key: \(key) with TTL: \(ttl)s")
     }
 
     func delete(key: String) async throws {
-        lock.lock()
         cache.removeValue(forKey: key)
-        lock.unlock()
-
         logger.debug("Deleted cache for key: \(key)")
     }
 
     func clearPattern(pattern: String) async throws {
-        lock.lock()
         let keysToRemove = cache.keys.filter { $0.contains(pattern.replacingOccurrences(of: "*", with: "")) }
         for key in keysToRemove {
             cache.removeValue(forKey: key)
         }
-        lock.unlock()
-
         logger.info("Cleared \(keysToRemove.count) cache entries matching pattern: \(pattern)")
     }
 
     // MARK: - Cache Key Generators
 
-    func leagueKey(id: Int, season: Int) -> String {
+    nonisolated func leagueKey(id: Int, season: Int) -> String {
         return "afcon:league:\(id):season:\(season)"
     }
 
-    func teamsKey(leagueID: Int, season: Int) -> String {
+    nonisolated func teamsKey(leagueID: Int, season: Int) -> String {
         return "afcon:teams:league:\(leagueID):season:\(season)"
     }
 
-    func fixturesKey(leagueID: Int, season: Int, date: String? = nil, teamID: Int? = nil) -> String {
+    nonisolated func fixturesKey(leagueID: Int, season: Int, date: String? = nil, teamID: Int? = nil) -> String {
         var key = "afcon:fixtures:league:\(leagueID):season:\(season)"
         if let date = date {
             key += ":date:\(date)"
@@ -104,15 +90,15 @@ public final class CacheService {
         return key
     }
 
-    func standingsKey(leagueID: Int, season: Int) -> String {
+    nonisolated func standingsKey(leagueID: Int, season: Int) -> String {
         return "afcon:standings:league:\(leagueID):season:\(season)"
     }
 
-    func fixtureIdKey(id: Int) -> String {
+    nonisolated func fixtureIdKey(id: Int) -> String {
         return "afcon:fixture:id:\(id)"
     }
 
-    func fixtureEventsKey(id: Int) -> String {
+    nonisolated func fixtureEventsKey(id: Int) -> String {
         return "afcon:fixture:id:\(id):events"
     }
 

@@ -20,6 +20,7 @@ public struct TeamStandingSummary: Sendable {
 }
 
 // Actor-based provider with simple in-memory caching by (league, season)
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
 public actor StandingsProvider {
     private let service: AFCONService
 

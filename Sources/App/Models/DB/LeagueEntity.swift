@@ -2,11 +2,11 @@ import Foundation
 import Vapor
 import Fluent
 
-final class LeagueEntity: Model, Content {
-    static let schema = "leagues"
+public final class LeagueEntity: Model, Content, @unchecked Sendable {
+    public static let schema = "leagues"
 
     @ID(key: .id)
-    var id: UUID?
+    public var id: UUID?
 
     // External API league identifier (unique)
     @Field(key: "api_league_id")
@@ -39,7 +39,7 @@ final class LeagueEntity: Model, Content {
     @Timestamp(key: "updated_at", on: .update)
     var updatedAt: Date?
 
-    init() {}
+    public init() {}
 
     init(
         id: UUID? = nil,

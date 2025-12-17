@@ -1,23 +1,34 @@
 import Foundation
 import Vapor
-import GRPC
-import NIO
+import GRPCCore
+import GRPCProtobuf
 import SwiftProtobuf
 
 /// gRPC service provider for AFCON data
-/// This class implements the AFCONServiceAsyncProvider protocol from the generated code
-public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
+/// This class implements the AFCON service protocol from the generated code (grpc-swift 2.x)
+public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @unchecked Sendable {
     private let apiClient: APIFootballClient
     private let cache: CacheService
     private let fixtureRepository: FixtureRepository
+    private let notificationService: NotificationService?
+    private let deviceRepository: DeviceRepository
     private let logger: Logger
     private var standingsRefreshTasks: [String: Task<Void, Never>] = [:]
     private let standingsTasksLock = NSLock()
 
-    public init(apiClient: APIFootballClient, cache: CacheService, fixtureRepository: FixtureRepository, logger: Logger) {
+    public init(
+        apiClient: APIFootballClient,
+        cache: CacheService,
+        fixtureRepository: FixtureRepository,
+        notificationService: NotificationService?,
+        deviceRepository: DeviceRepository,
+        logger: Logger
+    ) {
         self.apiClient = apiClient
         self.cache = cache
         self.fixtureRepository = fixtureRepository
+        self.notificationService = notificationService
+        self.deviceRepository = deviceRepository
         self.logger = logger
     }
 
@@ -81,79 +92,84 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
 
     /// Get league information
     public func getLeague(
-        request: Afcon_LeagueRequest,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws -> Afcon_LeagueResponse {
-        logger.info("gRPC: GetLeague - id=\(request.leagueID), season=\(request.season)")
+        request: ServerRequest<Afcon_LeagueRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_LeagueResponse> {
+        let req = request.message
+        logger.info("gRPC: GetLeague - id=\(req.leagueID), season=\(req.season)")
 
         // Fetch from API with caching
         let leagueData = try await cache.getOrFetchLeague(
-            id: Int(request.leagueID),
-            season: Int(request.season)
+            id: Int(req.leagueID),
+            season: Int(req.season)
         ) {
-            try await apiClient.getLeague(id: Int(request.leagueID), season: Int(request.season))
+            try await apiClient.getLeague(id: Int(req.leagueID), season: Int(req.season))
         }
 
         // Convert to gRPC response
-        return convertToLeagueResponse(leagueData)
+        let response = convertToLeagueResponse(leagueData)
+        return ServerResponse(message: response)
     }
 
     /// Get all teams for a league/season
     public func getTeams(
-        request: Afcon_TeamsRequest,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws -> Afcon_TeamsResponse {
-        logger.info("gRPC: GetTeams - league=\(request.leagueID), season=\(request.season)")
+        request: ServerRequest<Afcon_TeamsRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_TeamsResponse> {
+        let req = request.message
+        logger.info("gRPC: GetTeams - league=\(req.leagueID), season=\(req.season)")
 
         let teamsData = try await cache.getOrFetchTeams(
-            leagueID: Int(request.leagueID),
-            season: Int(request.season)
+            leagueID: Int(req.leagueID),
+            season: Int(req.season)
         ) {
-            try await apiClient.getTeams(leagueId: Int(request.leagueID), season: Int(request.season))
+            try await apiClient.getTeams(leagueId: Int(req.leagueID), season: Int(req.season))
         }
 
         var response = Afcon_TeamsResponse()
         response.teams = teamsData.map { convertToTeamInfo($0) }
-        return response
+        return ServerResponse(message: response)
     }
 
     /// Get fixtures for a league/season
     public func getFixtures(
-        request: Afcon_FixturesRequest,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws -> Afcon_FixturesResponse {
-        logger.info("gRPC: GetFixtures - league=\(request.leagueID), season=\(request.season)")
+        request: ServerRequest<Afcon_FixturesRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_FixturesResponse> {
+        let req = request.message
+        logger.info("gRPC: GetFixtures - league=\(req.leagueID), season=\(req.season)")
 
-        let date = request.date.isEmpty ? nil : request.date
-        let teamID = request.teamID == 0 ? nil : Int(request.teamID)
+        let date = req.date.isEmpty ? nil : req.date
+        let teamID = req.teamID == 0 ? nil : Int(req.teamID)
 
         let fixturesData = try await cache.getOrFetchFixtures(
-            leagueID: Int(request.leagueID),
-            season: Int(request.season),
+            leagueID: Int(req.leagueID),
+            season: Int(req.season),
             date: date,
             teamID: teamID,
-            live: request.live
+            live: req.live
         ) {
             try await apiClient.getFixtures(
-                leagueId: Int(request.leagueID),
-                season: Int(request.season),
+                leagueId: Int(req.leagueID),
+                season: Int(req.season),
                 date: date,
                 teamId: teamID,
-                live: request.live
+                live: req.live
             )
         }
 
         var response = Afcon_FixturesResponse()
         response.fixtures = fixturesData.map { convertToFixture($0) }
-        return response
+        return ServerResponse(message: response)
     }
 
     /// Get today's upcoming fixtures (not started yet)
     public func getTodayUpcoming(
-        request: Afcon_TodayUpcomingRequest,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws -> Afcon_FixturesResponse {
-        logger.info("gRPC: GetTodayUpcoming - league=\(request.leagueID), season=\(request.season)")
+        request: ServerRequest<Afcon_TodayUpcomingRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_FixturesResponse> {
+        let req = request.message
+        logger.info("gRPC: GetTodayUpcoming - league=\(req.leagueID), season=\(req.season)")
 
         // Get today's date in YYYY-MM-DD format
         let formatter = DateFormatter()
@@ -162,15 +178,15 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
 
         // Fetch today's fixtures
         let allFixtures = try await cache.getOrFetchFixtures(
-            leagueID: Int(request.leagueID),
-            season: Int(request.season),
+            leagueID: Int(req.leagueID),
+            season: Int(req.season),
             date: today,
             teamID: nil,
             live: false
         ) {
             try await apiClient.getFixtures(
-                leagueId: Int(request.leagueID),
-                season: Int(request.season),
+                leagueId: Int(req.leagueID),
+                season: Int(req.season),
                 date: today,
                 teamId: nil,
                 live: false
@@ -187,27 +203,28 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
 
         var response = Afcon_FixturesResponse()
         response.fixtures = upcomingFixtures.map { convertToFixture($0) }
-        return response
+        return ServerResponse(message: response)
     }
 
     /// Get next upcoming fixtures (all games at the earliest kickoff time)
     public func getNextUpcoming(
-        request: Afcon_NextUpcomingRequest,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws -> Afcon_FixturesResponse {
-        logger.info("gRPC: GetNextUpcoming - league=\(request.leagueID), season=\(request.season)")
+        request: ServerRequest<Afcon_NextUpcomingRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_FixturesResponse> {
+        let req = request.message
+        logger.info("gRPC: GetNextUpcoming - league=\(req.leagueID), season=\(req.season)")
 
         // Fetch all fixtures for the season
         let allFixtures = try await cache.getOrFetchFixtures(
-            leagueID: Int(request.leagueID),
-            season: Int(request.season),
+            leagueID: Int(req.leagueID),
+            season: Int(req.season),
             date: nil,
             teamID: nil,
             live: false
         ) {
             try await apiClient.getFixtures(
-                leagueId: Int(request.leagueID),
-                season: Int(request.season),
+                leagueId: Int(req.leagueID),
+                season: Int(req.season),
                 date: nil,
                 teamId: nil,
                 live: false
@@ -225,7 +242,7 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
         // Get all fixtures with the earliest timestamp (happening at the exact same time)
         guard !upcomingFixtures.isEmpty else {
             logger.info("gRPC: GetNextUpcoming - No upcoming fixtures found")
-            return Afcon_FixturesResponse()
+            return ServerResponse(message: Afcon_FixturesResponse())
         }
 
         let earliestTimestamp = upcomingFixtures[0].fixture.timestamp
@@ -235,105 +252,145 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
 
         var response = Afcon_FixturesResponse()
         response.fixtures = nextFixtures.map { convertToFixture($0) }
-        return response
+        return ServerResponse(message: response)
     }
 
     /// Get fixture by ID
     public func getFixtureById(
-        request: Afcon_FixtureByIdRequest,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws -> Afcon_FixtureResponse {
-        logger.info("gRPC: GetFixtureById - fixtureID=\(request.fixtureID)")
+        request: ServerRequest<Afcon_FixtureByIdRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_FixtureResponse> {
+        let req = request.message
+        logger.info("gRPC: GetFixtureById - fixtureID=\(req.fixtureID)")
 
-        let fixtureData = try await apiClient.getFixtureById(fixtureId: Int(request.fixtureID))
+        let fixtureData = try await apiClient.getFixtureById(fixtureId: Int(req.fixtureID))
 
         var response = Afcon_FixtureResponse()
         response.fixture = convertToFixture(fixtureData)
-        return response
+        return ServerResponse(message: response)
     }
 
     /// Get fixture events by ID
     public func getFixtureEvents(
-        request: Afcon_FixtureEventsRequest,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws -> Afcon_FixtureEventsResponse {
-        logger.info("gRPC: GetFixtureEvents - fixtureID=\(request.fixtureID)")
+        request: ServerRequest<Afcon_FixtureEventsRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_FixtureEventsResponse> {
+        let req = request.message
+        logger.info("gRPC: GetFixtureEvents - fixtureID=\(req.fixtureID)")
 
-        let events = try await apiClient.getFixtureEvents(fixtureId: Int(request.fixtureID))
+        let events = try await apiClient.getFixtureEvents(fixtureId: Int(req.fixtureID))
 
         var response = Afcon_FixtureEventsResponse()
         response.events = events.map { convertToFixtureEvent($0) }
-        return response
+        return ServerResponse(message: response)
     }
 
     /// Get fixtures by date
     public func getFixturesByDate(
-        request: Afcon_FixturesByDateRequest,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws -> Afcon_FixturesResponse {
-        logger.info("gRPC: GetFixturesByDate - date=\(request.date)")
+        request: ServerRequest<Afcon_FixturesByDateRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_FixturesResponse> {
+        let req = request.message
+        logger.info("gRPC: GetFixturesByDate - date=\(req.date)")
 
-        let leagueID = request.leagueID > 0 ? Int(request.leagueID) : nil
-        let season = request.season > 0 ? Int(request.season) : nil
+        let leagueID = req.leagueID > 0 ? Int(req.leagueID) : nil
+        let season = req.season > 0 ? Int(req.season) : nil
 
         var response = Afcon_FixturesResponse()
 
-        if
-            let leagueID,
-            let season,
-            !request.date.isEmpty
-        {
+        var requestedDate: Date?
+        var isToday = false
+
+        if !req.date.isEmpty {
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy-MM-dd"
             formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            requestedDate = formatter.date(from: req.date)
 
-            if let targetDate = formatter.date(from: request.date) {
+            if
+                let requestedDate,
+                let gmt = TimeZone(secondsFromGMT: 0)
+            {
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = gmt
+                isToday = calendar.isDate(requestedDate, inSameDayAs: Date())
+            }
+        }
+
+        var lastError: Error?
+
+        if let leagueID = leagueID, let season = season {
+            do {
+                let fixturesData = try await cache.getOrFetchFixtures(
+                    leagueID: leagueID,
+                    season: season,
+                    date: req.date,
+                    teamID: nil,
+                    live: isToday
+                ) {
+                    try await apiClient.getFixtures(
+                        leagueId: leagueID,
+                        season: season,
+                        date: req.date,
+                        teamId: nil,
+                        live: isToday
+                    )
+                }
+
+                if !fixturesData.isEmpty {
+                    let competitionName = fixturesData.first?.league.name ?? "League \(leagueID)"
+                    try await fixtureRepository.upsertBatch(
+                        fixtures: fixturesData,
+                        leagueId: leagueID,
+                        season: season,
+                        competition: competitionName
+                    )
+                }
+
+                response.fixtures = fixturesData.map { convertToFixture($0) }
+                return ServerResponse(message: response)
+            } catch {
+                lastError = error
+                logger.warning("gRPC: GetFixturesByDate - failed to fetch from API/cache for league \(leagueID), season \(season); falling back to DB: \(error)")
+            }
+
+            if let requestedDate {
                 let dbFixtures = try await fixtureRepository.getFixturesForDate(
                     leagueId: leagueID,
                     season: season,
-                    date: targetDate
+                    date: requestedDate
                 )
 
                 if !dbFixtures.isEmpty {
+                    logger.info("gRPC: GetFixturesByDate - served from DB fallback for \(req.date) (\(dbFixtures.count) fixtures)")
                     response.fixtures = dbFixtures.map { convertFixtureEntityToFixture($0) }
-                    return response
+                    return ServerResponse(message: response)
                 }
             }
+
+            if let error = lastError {
+                throw error
+            }
+
+            return ServerResponse(message: response)
         }
 
-        let fixturesData: [FixtureData]
-        if let leagueID = leagueID, let season = season {
-            fixturesData = try await cache.getOrFetchFixtures(
-                leagueID: leagueID,
-                season: season,
-                date: request.date,
-                teamID: nil,
-                live: false
-            ) {
-                try await apiClient.getFixtures(
-                    leagueId: leagueID,
-                    season: season,
-                    date: request.date,
-                    teamId: nil,
-                    live: false
-                )
-            }
-        } else {
-            fixturesData = try await apiClient.getFixturesByDate(date: request.date)
-        }
+        let fixturesData = try await apiClient.getFixturesByDate(date: req.date)
 
         response.fixtures = fixturesData.map { convertToFixture($0) }
-        return response
+        return ServerResponse(message: response)
     }
 
     /// Stream live match updates
     public func streamLiveMatches(
-        request: Afcon_LiveMatchRequest,
-        responseStream: GRPC.GRPCAsyncResponseStreamWriter<Afcon_LiveMatchUpdate>,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws {
-        let isPaused = request.leagueID == 6 // Only pause AFCON (league 6)
-        logger.info("gRPC: StreamLiveMatches - league=\(request.leagueID)\(isPaused ? " - PAUSED" : "")")
+        request: ServerRequest<Afcon_LiveMatchRequest>,
+        context: ServerContext
+    ) async throws -> StreamingServerResponse<Afcon_LiveMatchUpdate> {
+        let req = request.message
+        let isPaused = req.leagueID == 6 // Only pause AFCON (league 6)
+        self.logger.info("gRPC: StreamLiveMatches - league=\(req.leagueID)\(isPaused ? " - PAUSED" : "")")
+
+        return StreamingServerResponse { writer in
 
         var previousFixtures: [Int: FixtureData] = [:]
         var previousEvents: [Int: [FixtureEvent]] = [:] // Track events per fixture
@@ -351,7 +408,7 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
                     liveFixtures = []
                 } else {
                     // Active streaming for other leagues
-                    liveFixtures = try await apiClient.getLiveFixtures(leagueId: Int(request.leagueID))
+                    liveFixtures = try await self.apiClient.getLiveFixtures(leagueId: Int(req.leagueID))
                 }
 
                 // Calculate dynamic sleep interval
@@ -363,8 +420,8 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
                     // Check for next fixture info
                     if lastNoLiveCheckTime == nil || currentTime.timeIntervalSince(lastNoLiveCheckTime!) > 300 {
                         lastNoLiveCheckTime = currentTime
-                        nextFixtureTimestamp = await getNextUpcomingFixtureTimestamp(leagueId: Int(request.leagueID), season: Int(request.season))
-                        await logNextUpcomingFixture(leagueId: Int(request.leagueID), season: Int(request.season))
+                        nextFixtureTimestamp = await self.getNextUpcomingFixtureTimestamp(leagueId: Int(req.leagueID), season: Int(req.season))
+                        await self.logNextUpcomingFixture(leagueId: Int(req.leagueID), season: Int(req.season))
                     }
 
                     // Calculate time until next fixture and adjust sleep
@@ -380,28 +437,28 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
                         if timeUntilMatch > 86400 {
                             // More than 1 day away: sleep for 12 hours
                             sleepInterval = 12 * 60 * 60 * 1_000_000_000
-                            logger.info("⏸️ No live matches. Next fixture in \(days) day\(days == 1 ? "" : "s"). Pausing polling for 12 hours...")
+                            self.logger.info("⏸️ No live matches. Next fixture in \(days) day\(days == 1 ? "" : "s"). Pausing polling for 12 hours...")
                         } else if timeUntilMatch > 21600 {
                             // Between 6 hours and 1 day: sleep for 3 hours
                             sleepInterval = 3 * 60 * 60 * 1_000_000_000
-                            logger.info("⏸️ No live matches. Next fixture in \(hours) hours. Pausing polling for 3 hours...")
+                            self.logger.info("⏸️ No live matches. Next fixture in \(hours) hours. Pausing polling for 3 hours...")
                         } else if timeUntilMatch > 3600 {
                             // Between 1 hour and 6 hours: sleep for 30 minutes
                             sleepInterval = 30 * 60 * 1_000_000_000
-                            logger.info("⏸️ No live matches. Next fixture in \(hours) hour\(hours == 1 ? "" : "s"). Pausing polling for 30 minutes...")
+                            self.logger.info("⏸️ No live matches. Next fixture in \(hours) hour\(hours == 1 ? "" : "s"). Pausing polling for 30 minutes...")
                         } else if timeUntilMatch > 600 {
                             // Between 10 minutes and 1 hour: sleep for 5 minutes
                             sleepInterval = 5 * 60 * 1_000_000_000
-                            logger.info("⏸️ No live matches. Next fixture in \(minutes) minutes. Pausing polling for 5 minutes...")
+                            self.logger.info("⏸️ No live matches. Next fixture in \(minutes) minutes. Pausing polling for 5 minutes...")
                         } else if timeUntilMatch > 0 {
                             // Less than 10 minutes: start polling every 15 seconds
                             sleepInterval = activePollingInterval
-                            logger.info("⏰ Next fixture starts in \(minutes) minute\(minutes == 1 ? "" : "s"). Resuming active polling...")
+                            self.logger.info("⏰ Next fixture starts in \(minutes) minute\(minutes == 1 ? "" : "s"). Resuming active polling...")
                         }
                     } else {
                         // No next fixture found, sleep for 24 hours
                         sleepInterval = 24 * 60 * 60 * 1_000_000_000
-                        logger.info("⏸️ No upcoming fixtures found. Pausing polling for 24 hours...")
+                        self.logger.info("⏸️ No upcoming fixtures found. Pausing polling for 24 hours...")
                     }
                 }
 
@@ -409,11 +466,11 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
                     let fixtureID = fixture.fixture.id
 
                     // Fetch current events for this fixture
-                    let currentEvents = try await fetchFixtureEventsIfNeeded(fixtureId: fixtureID)
+                    let currentEvents = try await self.fetchFixtureEventsIfNeeded(fixtureId: fixtureID)
 
                     if let previous = previousFixtures[fixtureID] {
                         // Detect changes
-                        if hasSignificantChanges(
+                        if self.hasSignificantChanges(
                             previous: previous,
                             current: fixture,
                             currentEvents: currentEvents,
@@ -424,40 +481,40 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
                             update.timestamp = Google_Protobuf_Timestamp(date: Date())
 
                             // Enhanced event detection with actual fixture events
-                            let detectedEventType = detectEventTypeEnhanced(
+                            let detectedEventType = self.detectEventTypeEnhanced(
                                 previous: previous,
                                 current: fixture,
                                 currentEvents: currentEvents,
                                 previousEvents: previousEvents[fixtureID] ?? []
                             )
                             update.eventType = detectedEventType
-                            update.fixture = convertToFixture(fixture)
+                            update.fixture = self.convertToFixture(fixture)
 
                             // Materialize status for easy access
-                            update.status = convertToFixtureStatus(fixture.fixture.status)
+                            update.status = self.convertToFixtureStatus(fixture.fixture.status)
 
                             // Include recent events (last 5 minutes)
-                            let recentEvents = getRecentEvents(
+                            let recentEvents = self.getRecentEvents(
                                 events: currentEvents,
                                 currentElapsed: fixture.fixture.status.elapsed ?? 0
                             )
                             update.recentEvents = recentEvents
 
-                            logger.info("📊 Fixture \(fixtureID): \(currentEvents.count) total events, \(recentEvents.count) recent events")
+                            self.logger.info("📊 Fixture \(fixtureID): \(currentEvents.count) total events, \(recentEvents.count) recent events")
 
                             // Debug: Log each event being sent
                             for (index, event) in recentEvents.enumerated() {
-                                logger.info("   Event \(index + 1): \(event.time.elapsed)' \(event.type) - \(event.player.name)")
+                                self.logger.info("   Event \(index + 1): \(event.time.elapsed)' \(event.type) - \(event.player.name)")
                             }
 
                             // Attach latest event if there is a newly detected one
                             let newlyDetectedEvents = currentEvents.filter { currentEvent in
                                 !(previousEvents[fixtureID] ?? []).contains { prevEvent in
-                                    eventsAreEqual(currentEvent, prevEvent)
+                                    self.eventsAreEqual(currentEvent, prevEvent)
                                 }
                             }
                             if let latestEvent = newlyDetectedEvents.last {
-                                update.event = convertToFixtureEvent(latestEvent)
+                                update.event = self.convertToFixtureEvent(latestEvent)
                             }
 
                             // Log each newly detected event with detailed description
@@ -488,11 +545,31 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
                                     }
 
                                     // Log the goal event first
-                                    logger.info("\(logMessage)")
+                                    self.logger.info("\(logMessage)")
+
+                                    // Send goal notification
+                                    Task {
+                                        do {
+//                                             try await self.notificationService?.sendGoalNotification(
+//                                                 fixtureId: fixtureID,
+//                                                 homeTeam: fixture.teams.home.name,
+//                                                 awayTeam: fixture.teams.away.name,
+//                                                 homeGoals: fixture.goals.home ?? 0,
+//                                                 awayGoals: fixture.goals.away ?? 0,
+//                                                 scorer: playerName,
+//                                                 assist: newEvent.assist?.name,
+//                                                 minute: elapsed,
+//                                                 leagueId: Int(req.leagueID),
+//                                                 season: Int(req.season)
+//                                             )
+                                        } catch {
+                                            self.logger.error("Failed to send goal notification: \(error)")
+                                        }
+                                    }
 
                                     // Fetch and log standings/rankings after a goal
                                     Task {
-                                        await logStandingsForGoal(leagueId: Int(request.leagueID), teamName: teamName, utcTime: utcTime)
+                                        await self.logStandingsForGoal(leagueId: Int(req.leagueID), teamName: teamName, utcTime: utcTime)
                                     }
 
                                     // Skip the normal logging at the end since we already logged
@@ -500,6 +577,26 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
                                 case "card":
                                     let cardEmoji = eventDetail.lowercased().contains("yellow") ? "🟨" : "🟥"
                                     logMessage += " | \(cardEmoji) \(eventDetail.uppercased()) for \(playerName)"
+
+                                    // Send red card notification
+                                    if eventDetail.lowercased().contains("red") {
+                                        Task {
+                                            do {
+//                                                 try await self.notificationService?.sendRedCardNotification(
+//                                                     fixtureId: fixtureID,
+//                                                     homeTeam: fixture.teams.home.name,
+//                                                     awayTeam: fixture.teams.away.name,
+//                                                     player: playerName,
+//                                                     team: teamName,
+//                                                     minute: elapsed,
+//                                                     leagueId: Int(req.leagueID),
+//                                                     season: Int(req.season)
+//                                                 )
+                                            } catch {
+                                                self.logger.error("Failed to send red card notification: \(error)")
+                                            }
+                                        }
+                                    }
                                 case "subst":
                                     logMessage += " | 🔄 SUBSTITUTION - OUT: \(playerName)"
                                     if let assist = newEvent.assist, let assistName = assist.name, !assistName.isEmpty {
@@ -518,17 +615,17 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
                                     logMessage += " | Note: \(comments)"
                                 }
 
-                                logger.info("\(logMessage)")
+                                self.logger.info("\(logMessage)")
                             }
 
-                            try await fixtureRepository.upsert(
+                            try await self.fixtureRepository.upsert(
                                 from: fixture,
-                                leagueId: Int(request.leagueID),
-                                season: Int(request.season),
+                                leagueId: Int(req.leagueID),
+                                season: Int(req.season),
                                 competition: fixture.league.name
                             )
 
-                            try await responseStream.send(update)
+                            try await writer.write(update)
                         }
                     } else {
                         // New live match
@@ -536,30 +633,30 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
                         update.fixtureID = Int32(fixtureID)
                         update.timestamp = Google_Protobuf_Timestamp(date: Date())
                         update.eventType = "match_started"
-                        update.fixture = convertToFixture(fixture)
+                        update.fixture = self.convertToFixture(fixture)
 
                         // Materialize status
-                        update.status = convertToFixtureStatus(fixture.fixture.status)
+                        update.status = self.convertToFixtureStatus(fixture.fixture.status)
 
                         // Include recent events
-                        update.recentEvents = getRecentEvents(
+                        update.recentEvents = self.getRecentEvents(
                             events: currentEvents,
                             currentElapsed: fixture.fixture.status.elapsed ?? 0
                         )
 
                         // Attach latest event if available
                         if let latestEvent = currentEvents.last {
-                            update.event = convertToFixtureEvent(latestEvent)
+                            update.event = self.convertToFixtureEvent(latestEvent)
                         }
 
-                        try await fixtureRepository.upsert(
+                        try await self.fixtureRepository.upsert(
                             from: fixture,
-                            leagueId: Int(request.leagueID),
-                            season: Int(request.season),
+                            leagueId: Int(req.leagueID),
+                            season: Int(req.season),
                             competition: fixture.league.name
                         )
 
-                        try await responseStream.send(update)
+                        try await writer.write(update)
                     }
 
                     previousFixtures[fixtureID] = fixture
@@ -572,16 +669,16 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
                     if !currentLiveIDs.contains(fixtureID) {
                         let finalFixture: FixtureData
                         do {
-                            finalFixture = try await apiClient.getFixtureById(fixtureId: fixtureID)
+                            finalFixture = try await self.apiClient.getFixtureById(fixtureId: fixtureID)
                         } catch {
-                            logger.warning("⚠️ Failed to fetch final fixture snapshot for \(fixtureID), using cached data: \(error)")
+                            self.logger.warning("⚠️ Failed to fetch final fixture snapshot for \(fixtureID), using cached data: \(error)")
                             finalFixture = fixture
                         }
 
-                        try await fixtureRepository.upsert(
+                        try await self.fixtureRepository.upsert(
                             from: finalFixture,
-                            leagueId: Int(request.leagueID),
-                            season: Int(request.season),
+                            leagueId: Int(req.leagueID),
+                            season: Int(req.season),
                             competition: finalFixture.league.name
                         )
 
@@ -589,12 +686,29 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
                         update.fixtureID = Int32(fixtureID)
                         update.timestamp = Google_Protobuf_Timestamp(date: Date())
                         update.eventType = "match_finished"
-                        update.fixture = convertToFixture(finalFixture)
+                        update.fixture = self.convertToFixture(finalFixture)
 
                         // Materialize final status
-                        update.status = convertToFixtureStatus(finalFixture.fixture.status)
+                        update.status = self.convertToFixtureStatus(finalFixture.fixture.status)
 
-                        try await responseStream.send(update)
+                        // Send match finished notification
+                        Task {
+                            do {
+//                                 try await self.notificationService?.sendMatchEndNotification(
+//                                     fixtureId: fixtureID,
+//                                     homeTeam: finalFixture.teams.home.name,
+//                                     awayTeam: finalFixture.teams.away.name,
+//                                     homeGoals: finalFixture.goals.home ?? 0,
+//                                     awayGoals: finalFixture.goals.away ?? 0,
+//                                     leagueId: Int(req.leagueID),
+//                                     season: Int(req.season)
+//                                 )
+                            } catch {
+                                self.logger.error("Failed to send match end notification: \(error)")
+                            }
+                        }
+
+                        try await writer.write(update)
                         previousFixtures.removeValue(forKey: fixtureID)
                         previousEvents.removeValue(forKey: fixtureID)
                     }
@@ -602,9 +716,11 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
 
                 try await Task.sleep(nanoseconds: sleepInterval)
             } catch {
-                logger.error("Error in live stream: \(error)")
+                self.logger.error("Error in live stream: \(error)")
                 try await Task.sleep(nanoseconds: activePollingInterval)
             }
+        }
+        return [:] // Return empty metadata for stream
         }
     }
 
@@ -897,89 +1013,93 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
 
     /// Get standings
     public func getStandings(
-        request: Afcon_StandingsRequest,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws -> Afcon_StandingsResponse {
-        logger.info("gRPC: GetStandings - league=\(request.leagueID), season=\(request.season)")
+        request: ServerRequest<Afcon_StandingsRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_StandingsResponse> {
+        let req = request.message
+        logger.info("gRPC: GetStandings - league=\(req.leagueID), season=\(req.season)")
 
         // Check if there are live matches to determine cache TTL
         let hasLive = try await fixtureRepository.hasLiveMatches(
-            leagueId: Int(request.leagueID),
-            season: Int(request.season)
+            leagueId: Int(req.leagueID),
+            season: Int(req.season)
         )
 
         let standingsData = try await cache.getOrFetchStandings(
-            leagueID: Int(request.leagueID),
-            season: Int(request.season),
+            leagueID: Int(req.leagueID),
+            season: Int(req.season),
             hasLiveMatches: hasLive
         ) {
-            try await apiClient.getStandings(leagueId: Int(request.leagueID), season: Int(request.season))
+            try await apiClient.getStandings(leagueId: Int(req.leagueID), season: Int(req.season))
         }
 
         var response = Afcon_StandingsResponse()
         // Convert standings data
         // Note: Implementation depends on API structure
-        return response
+        return ServerResponse(message: response)
     }
 
     /// Get team details
     public func getTeamDetails(
-        request: Afcon_TeamDetailsRequest,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws -> Afcon_TeamDetailsResponse {
-        logger.info("gRPC: GetTeamDetails - team=\(request.teamID)")
+        request: ServerRequest<Afcon_TeamDetailsRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_TeamDetailsResponse> {
+        let req = request.message
+        logger.info("gRPC: GetTeamDetails - team=\(req.teamID)")
 
-        let teamData = try await apiClient.getTeamDetails(teamId: Int(request.teamID))
+        let teamData = try await apiClient.getTeamDetails(teamId: Int(req.teamID))
 
         var response = Afcon_TeamDetailsResponse()
         response.team = convertToTeam(teamData.team)
         response.venue = convertToVenue(teamData.venue)
-        return response
+        return ServerResponse(message: response)
     }
 
     /// Get fixture lineups
     public func getLineups(
-        request: Afcon_LineupsRequest,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws -> Afcon_LineupsResponse {
-        logger.info("gRPC: GetLineups - fixture=\(request.fixtureID)")
+        request: ServerRequest<Afcon_LineupsRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_LineupsResponse> {
+        let req = request.message
+        logger.info("gRPC: GetLineups - fixture=\(req.fixtureID)")
 
-        let lineupsData = try await apiClient.getFixtureLineups(fixtureId: Int(request.fixtureID))
+        let lineupsData = try await apiClient.getFixtureLineups(fixtureId: Int(req.fixtureID))
 
         var response = Afcon_LineupsResponse()
         response.lineups = lineupsData.map { convertToFixtureLineup($0) }
-        return response
+        return ServerResponse(message: response)
     }
 
     /// Sync fixtures from API to database
     public func syncFixtures(
-        request: Afcon_SyncFixturesRequest,
-        context: GRPC.GRPCAsyncServerCallContext
-    ) async throws -> Afcon_SyncFixturesResponse {
-        logger.info("gRPC: SyncFixtures - league=\(request.leagueID), season=\(request.season), competition=\(request.competition)")
+        request: ServerRequest<Afcon_SyncFixturesRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_SyncFixturesResponse> {
+        let req = request.message
+        logger.info("gRPC: SyncFixtures - league=\(req.leagueID), season=\(req.season), competition=\(req.competition)")
 
         var response = Afcon_SyncFixturesResponse()
 
         do {
             // Fetch all fixtures from API
             let fixturesData = try await apiClient.getFixtures(
-                leagueId: Int(request.leagueID),
-                season: Int(request.season)
+                leagueId: Int(req.leagueID),
+                season: Int(req.season)
             )
 
             // Upsert all fixtures into database
             try await fixtureRepository.upsertBatch(
                 fixtures: fixturesData,
-                leagueId: Int(request.leagueID),
-                season: Int(request.season),
-                competition: request.competition
+                leagueId: Int(req.leagueID),
+                season: Int(req.season),
+                competition: req.competition
             )
 
             response.success = true
             response.fixturesSynced = Int32(fixturesData.count)
             response.message = "Successfully synced \(fixturesData.count) fixtures to database"
 
-            logger.info("✅ Synced \(fixturesData.count) fixtures for league \(request.leagueID), season \(request.season)")
+            logger.info("✅ Synced \(fixturesData.count) fixtures for league \(req.leagueID), season \(req.season)")
         } catch {
             response.success = false
             response.fixturesSynced = 0
@@ -988,7 +1108,7 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
             logger.error("❌ Failed to sync fixtures: \(error)")
         }
 
-        return response
+        return ServerResponse(message: response)
     }
 
     // MARK: - Conversion Methods
@@ -1442,5 +1562,158 @@ public final class AFCONServiceProvider: Afcon_AFCONServiceAsyncProvider {
         }
 
         return protoLineup
+    }
+
+    // MARK: - Push Notification Management
+
+    /// Register a device for push notifications
+    public func registerDevice(
+        request: ServerRequest<Afcon_RegisterDeviceRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_RegisterDeviceResponse> {
+        let req = request.message
+        logger.info("gRPC: RegisterDevice - user=\(req.userID), platform=\(req.platform)")
+
+        let device = try await deviceRepository.registerDevice(
+            userId: req.userID,
+            deviceToken: req.deviceToken,
+            platform: req.platform,
+            deviceId: req.deviceID.isEmpty ? nil : req.deviceID,
+            appVersion: req.appVersion.isEmpty ? nil : req.appVersion,
+            osVersion: req.osVersion.isEmpty ? nil : req.osVersion,
+            language: req.language.isEmpty ? "en" : req.language,
+            timezone: req.timezone.isEmpty ? nil : req.timezone
+        )
+
+        var response = Afcon_RegisterDeviceResponse()
+        response.success = true
+        response.deviceUuid = device.id?.uuidString ?? ""
+        response.message = "Device registered successfully"
+
+        return ServerResponse(message: response)
+    }
+
+    /// Update device token (for token refresh)
+    public func updateDeviceToken(
+        request: ServerRequest<Afcon_UpdateDeviceTokenRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_UpdateDeviceTokenResponse> {
+        let req = request.message
+        logger.info("gRPC: UpdateDeviceToken - device=\(req.deviceUuid)")
+
+        guard let deviceUUID = UUID(uuidString: req.deviceUuid) else {
+            throw Abort(.badRequest, reason: "Invalid device UUID")
+        }
+
+        try await deviceRepository.updateDeviceToken(
+            deviceUUID: deviceUUID,
+            newToken: req.newDeviceToken
+        )
+
+        var response = Afcon_UpdateDeviceTokenResponse()
+        response.success = true
+        response.message = "Device token updated successfully"
+
+        return ServerResponse(message: response)
+    }
+
+    /// Update notification subscriptions for a device
+    public func updateSubscriptions(
+        request: ServerRequest<Afcon_UpdateSubscriptionsRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_UpdateSubscriptionsResponse> {
+        let req = request.message
+        logger.info("gRPC: UpdateSubscriptions - device=\(req.deviceUuid), subscriptions=\(req.subscriptions.count)")
+
+        guard let deviceUUID = UUID(uuidString: req.deviceUuid) else {
+            throw Abort(.badRequest, reason: "Invalid device UUID")
+        }
+
+        // Convert proto subscriptions to repository format
+        let subscriptions = req.subscriptions.map { sub -> (leagueId: Int, season: Int, teamId: Int?, preferences: (notifyGoals: Bool, notifyMatchStart: Bool, notifyMatchEnd: Bool, notifyRedCards: Bool, notifyLineups: Bool, notifyVar: Bool, matchStartMinutesBefore: Int)) in
+            let leagueId = Int(sub.leagueID)
+            let season = Int(sub.season)
+            let teamId = sub.teamID == 0 ? nil : Int(sub.teamID)
+            let prefs = (
+                notifyGoals: sub.preferences.notifyGoals,
+                notifyMatchStart: sub.preferences.notifyMatchStart,
+                notifyMatchEnd: sub.preferences.notifyMatchEnd,
+                notifyRedCards: sub.preferences.notifyRedCards,
+                notifyLineups: sub.preferences.notifyLineups,
+                notifyVar: sub.preferences.notifyVar,
+                matchStartMinutesBefore: Int(sub.preferences.matchStartMinutesBefore)
+            )
+            return (leagueId: leagueId, season: season, teamId: teamId, preferences: prefs)
+        }
+
+        try await deviceRepository.updateSubscriptions(
+            deviceUUID: deviceUUID,
+            subscriptions: subscriptions
+        )
+
+        var response = Afcon_UpdateSubscriptionsResponse()
+        response.success = true
+        response.subscriptionsUpdated = Int32(subscriptions.count)
+        response.message = "Subscriptions updated successfully"
+
+        return ServerResponse(message: response)
+    }
+
+    /// Get notification subscriptions for a device
+    public func getSubscriptions(
+        request: ServerRequest<Afcon_GetSubscriptionsRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_GetSubscriptionsResponse> {
+        let req = request.message
+        logger.info("gRPC: GetSubscriptions - device=\(req.deviceUuid)")
+
+        guard let deviceUUID = UUID(uuidString: req.deviceUuid) else {
+            throw Abort(.badRequest, reason: "Invalid device UUID")
+        }
+
+        let subscriptions = try await deviceRepository.getSubscriptions(deviceUUID: deviceUUID)
+
+        var response = Afcon_GetSubscriptionsResponse()
+        response.subscriptions = subscriptions.map { sub in
+            var protoSub = Afcon_Subscription()
+            protoSub.leagueID = Int32(sub.leagueId)
+            protoSub.season = Int32(sub.season)
+            protoSub.teamID = Int32(sub.teamId ?? 0)
+
+            var prefs = Afcon_NotificationPreferences()
+            prefs.notifyGoals = sub.notifyGoals
+            prefs.notifyMatchStart = sub.notifyMatchStart
+            prefs.notifyMatchEnd = sub.notifyMatchEnd
+            prefs.notifyRedCards = sub.notifyRedCards
+            prefs.notifyLineups = sub.notifyLineups
+            prefs.notifyVar = sub.notifyVar
+            prefs.matchStartMinutesBefore = Int32(sub.matchStartMinutesBefore)
+
+            protoSub.preferences = prefs
+            return protoSub
+        }
+
+        return ServerResponse(message: response)
+    }
+
+    /// Unregister a device (mark as inactive)
+    public func unregisterDevice(
+        request: ServerRequest<Afcon_UnregisterDeviceRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_UnregisterDeviceResponse> {
+        let req = request.message
+        logger.info("gRPC: UnregisterDevice - device=\(req.deviceUuid)")
+
+        guard let deviceUUID = UUID(uuidString: req.deviceUuid) else {
+            throw Abort(.badRequest, reason: "Invalid device UUID")
+        }
+
+        try await deviceRepository.unregisterDevice(deviceUUID: deviceUUID)
+
+        var response = Afcon_UnregisterDeviceResponse()
+        response.success = true
+        response.message = "Device unregistered successfully"
+
+        return ServerResponse(message: response)
     }
 }

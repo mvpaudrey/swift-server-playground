@@ -1,13 +1,12 @@
 import Foundation
-import GRPC
-import NIO
+import GRPCCore
+import GRPCNIOTransportHTTP2
 
 /// Service to communicate with AFCON Middleware via gRPC
-/// This is a lightweight client library for iOS/macOS apps
-public class AFCONService {
-    private let client: Afcon_AFCONServiceAsyncClient
-    private let group: EventLoopGroup
-    private let channel: GRPCChannel
+/// This is a lightweight client library for iOS/macOS apps (grpc-swift 2.x)
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+public final class AFCONService: Sendable {
+    private let client: Afcon_AFCONService.Client<HTTP2ClientTransport.Posix>
 
     // Configuration
     public let host: String
@@ -17,27 +16,18 @@ public class AFCONService {
     /// - Parameters:
     ///   - host: gRPC server host (default: localhost for development)
     ///   - port: gRPC server port (default: 50051)
-    public init(host: String = "localhost", port: Int = 50051) {
+    public init(host: String = "localhost", port: Int = 50051) throws {
         self.host = host
         self.port = port
 
-        // Create event loop group
-        self.group = PlatformSupport.makeEventLoopGroup(loopCount: 1)
-
-        // Create gRPC channel
-        self.channel = try! GRPCChannelPool.with(
-            target: .host(host, port: port),
-            transportSecurity: .plaintext,
-            eventLoopGroup: group
+        // Create transport
+        let transport = try HTTP2ClientTransport.Posix(
+            target: .ipv4(host: host, port: port),
+            transportSecurity: .plaintext
         )
 
-        // Create client
-        self.client = Afcon_AFCONServiceAsyncClient(channel: channel)
-    }
-
-    deinit {
-        try? channel.close().wait()
-        try? group.syncShutdownGracefully()
+        // Create typed client
+        self.client = Afcon_AFCONService.Client(wrapping: GRPCClient(transport: transport))
     }
 
     // MARK: - API Methods
@@ -57,7 +47,7 @@ public class AFCONService {
         request.leagueID = leagueId
         request.season = season
 
-        let response = try await client.getTeams(request)
+        let response: Afcon_TeamsResponse = try await client.getTeams(request)
         return response.teams
     }
 
@@ -82,7 +72,7 @@ public class AFCONService {
             request.teamID = teamId
         }
 
-        let response = try await client.getFixtures(request)
+        let response: Afcon_FixturesResponse = try await client.getFixtures(request)
         return response.fixtures
     }
 
@@ -113,28 +103,38 @@ public class AFCONService {
         var request = Afcon_LineupsRequest()
         request.fixtureID = fixtureId
 
-        let response = try await client.getLineups(request)
+        let response: Afcon_LineupsResponse = try await client.getLineups(request)
         return response.lineups
     }
 
     /// Stream live match updates
     public func streamLiveMatches(
         leagueId: Int32 = 6,
-        onUpdate: @escaping (Afcon_LiveMatchUpdate) -> Void
+        season: Int32 = 2025,
+        onUpdate: @Sendable @escaping (Afcon_LiveMatchUpdate) -> Void
     ) async throws {
         var request = Afcon_LiveMatchRequest()
         request.leagueID = leagueId
+        request.season = season
 
-        let stream = client.streamLiveMatches(request)
-
-        for try await update in stream {
-            onUpdate(update)
+        try await client.streamLiveMatches(request) { response in
+            for try await message in response.messages {
+                onUpdate(message)
+            }
+            return
         }
     }
 }
 
 // MARK: - Shared Instance
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
 extension AFCONService {
     /// Shared singleton instance for convenience
-    public static let shared = AFCONService()
+    public nonisolated(unsafe) static let shared: AFCONService = {
+        do {
+            return try AFCONService()
+        } catch {
+            fatalError("Failed to initialize AFCONService: \(error)")
+        }
+    }()
 }

@@ -7,14 +7,22 @@ Get up and running with the AFCON gRPC Middleware in 5 minutes!
 Make sure you have the following installed:
 
 ```bash
-# Check Swift version (5.9+)
+# Check Swift version (6.0+ required, 6.2 recommended)
 swift --version
+
+# Verify macOS version (15.0+ required)
+sw_vers
 
 # Check if tools are installed
 which protoc
 which protoc-gen-swift
 which redis-server
 ```
+
+**Minimum Requirements:**
+- Swift 6.0+ (tested with Swift 6.2)
+- macOS 15.0 (Sequoia) or iOS 18.0+
+- grpc-swift 2.x (installed automatically via Package.swift)
 
 If any are missing:
 

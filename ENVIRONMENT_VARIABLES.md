@@ -46,6 +46,8 @@ The server can automatically initialize the database with fixture data on startu
 - **Default**: `6:2025:AFCON 2025` (only AFCON 2025)
 - **Example**: `INIT_LEAGUES="6:2025:AFCON 2025,39:2024:Premier League,2:2025:Champions League"`
 
+**⚠️ IMPORTANT**: When using `./start-server.sh`, you MUST set `INIT_LEAGUES` in the `.env` file. Shell-exported variables will be overridden because the script sources `.env`.
+
 **Format Rules**:
 - Each league definition has three parts separated by colons: `id:season:name`
 - Multiple leagues are separated by commas
@@ -63,39 +65,50 @@ The server can automatically initialize the database with fixture data on startu
 
 ## Usage Examples
 
-### Example 1: Disable Auto-Initialization
+### Example 1: Using start-server.sh (Recommended for Development)
+
+When using `./start-server.sh`, edit the `.env` file:
+
 ```bash
-# Don't auto-initialize - use manual sync script instead
-export AUTO_INIT=false
+# Edit .env file and add/update:
+# INIT_LEAGUES=39:2025:Premier League
+
 ./start-server.sh
 ```
 
-### Example 2: Initialize Only AFCON
+Or use a text editor:
 ```bash
-# Initialize only AFCON 2025 (this is the default)
-export INIT_LEAGUES="6:2025:AFCON 2025"
+echo "INIT_LEAGUES=39:2025:Premier League" >> .env
 ./start-server.sh
 ```
 
-### Example 3: Initialize Multiple Leagues
+### Example 2: Running Directly with swift run
+
+When running `swift run Run` directly (without start-server.sh), shell exports work:
+
 ```bash
-# Initialize three leagues on startup
-export INIT_LEAGUES="6:2025:AFCON 2025,39:2024:Premier League,2:2025:Champions League"
+# Export works because you're not sourcing .env
+export INIT_LEAGUES="6:2025:AFCON 2025,39:2025:Premier League"
+swift run Run
+```
+
+### Example 3: Disable Auto-Initialization
+```bash
+# Edit .env file:
+# AUTO_INIT=false
+
 ./start-server.sh
 ```
 
-### Example 4: Custom Ports and Database
+### Example 4: Initialize Multiple Leagues
 ```bash
-# Configure all server settings
-export PORT=3000
-export GRPC_PORT=9090
-export DATABASE_URL="postgresql://user:pass@remote-host:5432/afcon_db"
-export API_FOOTBALL_KEY="your_key_here"
-export INIT_LEAGUES="6:2025:AFCON 2025"
+# Edit .env file and set:
+# INIT_LEAGUES=6:2025:AFCON 2025,39:2025:Premier League,2:2025:Champions League
+
 ./start-server.sh
 ```
 
-### Example 5: Production Deployment
+### Example 6: Production Deployment (Direct Run)
 ```bash
 # Production configuration - no auto-init, use remote database
 export AUTO_INIT=false
@@ -177,8 +190,36 @@ Or if you disabled auto-init:
 
 ## Troubleshooting
 
-### Issue: Server uses wrong league
-**Solution**: Set `INIT_LEAGUES` environment variable before starting the server.
+### Issue: INIT_LEAGUES environment variable is ignored
+
+**Problem**: You set `INIT_LEAGUES="39:2025:Premier League"` in your shell, but the server still initializes with AFCON.
+
+**Root Cause**: The `start-server.sh` script sources the `.env` file (line 29: `source .env`), which overwrites any environment variables you set in your shell before running the script.
+
+**Solution**:
+1. Add `INIT_LEAGUES` to your `.env` file:
+   ```bash
+   echo "INIT_LEAGUES=39:2025:Premier League" >> .env
+   ```
+
+2. Clear existing fixtures if you already ran with the wrong league:
+   ```bash
+   docker exec afcon-postgres psql -U postgres -d afcon -c 'DELETE FROM fixtures;'
+   ```
+
+3. Restart the server:
+   ```bash
+   ./start-server.sh
+   ```
+
+**Alternative**: Run the server directly without the script if you prefer shell exports:
+```bash
+export INIT_LEAGUES="39:2025:Premier League"
+swift run Run
+```
+
+### Issue: Server uses wrong league (general)
+**Solution**: Check if `INIT_LEAGUES` is set in your `.env` file when using `./start-server.sh`.
 
 ### Issue: Auto-initialization takes too long
 **Solution**: Set `AUTO_INIT=false` and use the sync script instead:
