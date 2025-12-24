@@ -1,4 +1,5 @@
 import Foundation
+#if canImport(SwiftData)
 import SwiftData
 
 // MARK: - Proto to SwiftData Converters
@@ -140,3 +141,4 @@ extension Afcon_Fixture {
         return fixture
     }
 }
+#endif
