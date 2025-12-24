@@ -6,7 +6,7 @@
 # ============================================================================
 # Stage 1: Build Stage
 # ============================================================================
-FROM swift:6.0-jammy AS build
+FROM swift:6.2-jammy AS build
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
