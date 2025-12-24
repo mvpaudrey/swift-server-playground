@@ -51,6 +51,7 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreateDeviceRegistrationEntity())
     app.migrations.add(CreateNotificationSubscriptionEntity())
     app.migrations.add(CreateNotificationHistoryEntity())
+    app.migrations.add(CreateLiveActivityEntity())
 
     // Run migrations on boot
     try await app.autoMigrate()
@@ -73,24 +74,58 @@ public func configure(_ app: Application) async throws {
 
     // Register Device Repository
     app.services.use { app -> DeviceRepository in
-        guard let db = app.db as? Database else {
+        guard let db = app.db as? any Database else {
             fatalError("Database not configured")
         }
         return DeviceRepository(db: db, logger: app.logger)
     }
 
     // Register Notification Service
-    // TODO: NotificationService needs APNSwift v5+ migration - temporarily disabled
-    // app.services.use { app -> NotificationService in
-    //     guard let db = app.db as? Database else {
-    //         fatalError("Database not configured")
-    //     }
-    //     do {
-    //         return try await NotificationService(db: db, logger: app.logger, app: app)
-    //     } catch {
-    //         fatalError("Failed to initialize NotificationService: \(error)")
-    //     }
-    // }
+    app.services.use { app -> NotificationService in
+        guard let db = app.db as? any Database else {
+            fatalError("Database not configured")
+        }
+        return NotificationService(
+            db: db,
+            logger: app.logger,
+            fcmClient: app.client,
+            eventLoopGroup: app.eventLoopGroup
+        )
+    }
+
+    // Register Live Match Broadcaster (centralized polling for scalability)
+    app.services.use { app -> LiveMatchBroadcaster in
+        guard let db = app.db as? any Database else {
+            fatalError("Database not configured")
+        }
+        let apiClient: APIFootballClient = app.getService()
+        let notificationService: NotificationService = app.getService()
+        let fixtureRepository = FixtureRepository(db: db, logger: app.logger)
+
+        return LiveMatchBroadcaster(
+            apiClient: apiClient,
+            fixtureRepository: fixtureRepository,
+            notificationService: notificationService,
+            logger: app.logger
+        )
+    }
+
+    // Register Standings Update Service
+    app.services.use { app -> StandingsUpdateService in
+        guard let db = app.db as? any Database else {
+            fatalError("Database not configured")
+        }
+        let apiClient: APIFootballClient = app.getService()
+        let cacheService: CacheService = app.getService()
+        let fixtureRepository = FixtureRepository(db: db, logger: app.logger)
+
+        return StandingsUpdateService(
+            apiClient: apiClient,
+            fixtureRepository: fixtureRepository,
+            cacheService: cacheService,
+            logger: app.logger
+        )
+    }
 
     // MARK: - HTTP Routes (Optional REST API for debugging)
 

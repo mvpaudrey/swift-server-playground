@@ -84,7 +84,7 @@ public final class NotificationSubscriptionEntity: Model, Content, @unchecked Se
 // MARK: - Migration
 
 struct CreateNotificationSubscriptionEntity: AsyncMigration {
-    func prepare(on database: Database) async throws {
+    func prepare(on database: any Database) async throws {
         try await database.schema(NotificationSubscriptionEntity.schema)
             .id()
             .field("device_id", .uuid, .required, .references(DeviceRegistrationEntity.schema, "id", onDelete: .cascade))
@@ -105,7 +105,7 @@ struct CreateNotificationSubscriptionEntity: AsyncMigration {
 
     }
 
-    func revert(on database: Database) async throws {
+    func revert(on database: any Database) async throws {
         try await database.schema(NotificationSubscriptionEntity.schema).delete()
     }
 }

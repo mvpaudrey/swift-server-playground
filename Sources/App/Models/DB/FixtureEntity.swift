@@ -186,7 +186,7 @@ public final class FixtureEntity: Model, Content, @unchecked Sendable {
 
 // MARK: - Migration
 struct CreateFixtureEntity: AsyncMigration {
-    func prepare(on database: Database) async throws {
+    func prepare(on database: any Database) async throws {
         try await database.schema(FixtureEntity.schema)
             .id()
             .field("api_fixture_id", .int, .required)
@@ -225,7 +225,7 @@ struct CreateFixtureEntity: AsyncMigration {
             .create()
     }
 
-    func revert(on database: Database) async throws {
+    func revert(on database: any Database) async throws {
         try await database.schema(FixtureEntity.schema).delete()
     }
 }

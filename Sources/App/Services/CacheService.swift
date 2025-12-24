@@ -94,6 +94,10 @@ public actor CacheService {
         return "afcon:standings:league:\(leagueID):season:\(season)"
     }
 
+    nonisolated func liveFixturesKey(leagueID: Int) -> String {
+        return "afcon:fixtures:league:\(leagueID):live"
+    }
+
     nonisolated func fixtureIdKey(id: Int) -> String {
         return "afcon:fixture:id:\(id)"
     }
@@ -153,6 +157,21 @@ public actor CacheService {
         let fresh = try await fetcher()
         let ttl = live ? CacheTTL.liveMatch : CacheTTL.fixtures
         try await set(key: key, value: fresh, ttl: ttl)
+        return fresh
+    }
+
+    func getOrFetchLiveFixtures(
+        leagueID: Int,
+        fetcher: () async throws -> [FixtureData]
+    ) async throws -> [FixtureData] {
+        let key = liveFixturesKey(leagueID: leagueID)
+
+        if let cached: [FixtureData] = try await get(key: key) {
+            return cached
+        }
+
+        let fresh = try await fetcher()
+        try await set(key: key, value: fresh, ttl: CacheTTL.liveMatch)
         return fresh
     }
 

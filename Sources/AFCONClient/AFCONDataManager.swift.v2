@@ -1,0 +1,332 @@
+import Foundation
+
+/// Data manager implementing simple file-based JSON caching:
+/// 1. Check file cache
+/// 2. If empty or stale, fetch from server
+/// 3. Update cache
+@MainActor
+public final class AFCONDataManager: ObservableObject {
+    // MARK: - Properties
+
+    public let service: AFCONService
+    private let leagueId: Int32
+    private let season: Int32
+    private let cacheDirectory: URL
+
+    @Published public var isLoading = false
+    @Published public var lastError: Error?
+
+    // MARK: - Cache Configuration
+
+    /// How long before cached data is considered stale (default: 1 hour)
+    public var cacheExpirationInterval: TimeInterval = 3600
+
+    // MARK: - Initialization
+
+    public init(
+        leagueId: Int32 = 6,
+        season: Int32 = 2025,
+        cacheDirectory: URL? = nil
+    ) throws {
+        self.leagueId = leagueId
+        self.season = season
+        self.service = try AFCONService()
+
+        // Setup cache directory
+        if let cacheDir = cacheDirectory {
+            self.cacheDirectory = cacheDir
+        } else {
+            let appSupportURL = FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first!
+
+            self.cacheDirectory = appSupportURL
+                .appendingPathComponent("AFCON2025", isDirectory: true)
+        }
+
+        // Create cache directory if needed
+        try? FileManager.default.createDirectory(
+            at: self.cacheDirectory,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+
+        print("✅ Cache initialized at: \(self.cacheDirectory.path)")
+    }
+
+    // MARK: - Cache Helpers
+
+    private func cacheFileURL(for key: String) -> URL {
+        cacheDirectory.appendingPathComponent("\(key).json")
+    }
+
+    private func loadFromCache<T: Codable>(_ type: T.Type, key: String) -> T? {
+        let fileURL = cacheFileURL(for: key)
+
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return nil
+        }
+
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+
+            // Check if cache is stale
+            let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            if let modificationDate = attributes[.modificationDate] as? Date {
+                let age = Date().timeIntervalSince(modificationDate)
+                if age > cacheExpirationInterval {
+                    print("⏰ Cache expired for \(key) (age: \(Int(age))s)")
+                    return nil
+                }
+            }
+
+            let cached = try decoder.decode(T.self, from: data)
+            print("📦 Loaded from cache: \(key)")
+            return cached
+        } catch {
+            print("⚠️ Failed to load cache for \(key): \(error)")
+            return nil
+        }
+    }
+
+    private func saveToCache<T: Codable>(_ value: T, key: String) {
+        let fileURL = cacheFileURL(for: key)
+
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = .prettyPrinted
+
+            let data = try encoder.encode(value)
+            try data.write(to: fileURL)
+            print("💾 Saved to cache: \(key)")
+        } catch {
+            print("⚠️ Failed to save cache for \(key): \(error)")
+        }
+    }
+
+    // MARK: - League
+
+    public func getLeague(
+        forceRefresh: Bool = false
+    ) async throws -> LeagueModel {
+        let cacheKey = "league_\(leagueId)_\(season)"
+
+        // Step 1: Check cache
+        if !forceRefresh, let cached = loadFromCache(LeagueModel.self, key: cacheKey) {
+            return cached
+        }
+
+        // Step 2: Fetch from server
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let response = try await service.getLeague(leagueId: leagueId, season: season)
+
+            guard let leagueInfo = response.league else {
+                throw AFCONError.noData
+            }
+
+            let league = LeagueModel(
+                id: Int(leagueInfo.id),
+                name: leagueInfo.name,
+                type: leagueInfo.type,
+                logoURL: leagueInfo.logoURL,
+                countryName: leagueInfo.countryName,
+                countryCode: leagueInfo.countryCode,
+                countryFlagURL: leagueInfo.countryFlagURL,
+                season: Int(leagueInfo.season)
+            )
+
+            // Step 3: Save to cache
+            saveToCache(league, key: cacheKey)
+
+            return league
+        } catch {
+            lastError = error
+            throw error
+        }
+    }
+
+    // MARK: - Teams
+
+    public func getTeams(
+        forceRefresh: Bool = false
+    ) async throws -> [TeamModel] {
+        let cacheKey = "teams_\(leagueId)_\(season)"
+
+        // Step 1: Check cache
+        if !forceRefresh, let cached = loadFromCache([TeamModel].self, key: cacheKey) {
+            return cached
+        }
+
+        // Step 2: Fetch from server
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let teams = try await service.getTeams(leagueId: leagueId, season: season)
+
+            let teamModels = teams.map { teamInfo in
+                TeamModel(
+                    id: Int(teamInfo.id),
+                    name: teamInfo.name,
+                    code: teamInfo.code,
+                    country: teamInfo.country,
+                    founded: Int(teamInfo.founded),
+                    logoURL: teamInfo.logoURL,
+                    venueName: teamInfo.venueName,
+                    venueCity: teamInfo.venueCity,
+                    venueCapacity: Int(teamInfo.venueCapacity),
+                    season: Int(season)
+                )
+            }
+
+            // Step 3: Save to cache
+            saveToCache(teams, key: cacheKey)
+
+            return teams
+        } catch {
+            lastError = error
+            throw error
+        }
+    }
+
+    // MARK: - Fixtures
+
+    public func getFixtures(
+        forceRefresh: Bool = false
+    ) async throws -> [FixtureModel] {
+        let cacheKey = "fixtures_\(leagueId)_\(season)"
+
+        // Step 1: Check cache
+        if !forceRefresh, let cached = loadFromCache([FixtureModel].self, key: cacheKey) {
+            return cached
+        }
+
+        // Step 2: Fetch from server
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let response = try await service.getFixtures(leagueId: leagueId, season: season)
+
+            let fixtures: [FixtureModel] = response.fixtures.map { fixtureInfo -> FixtureModel in
+                return FixtureModel(
+                    id: Int(fixtureInfo.id),
+                    referee: fixtureInfo.referee,
+                    timezone: fixtureInfo.timezone,
+                    date: fixtureInfo.date.date,
+                    timestamp: fixtureInfo.timestamp,
+                    venueName: fixtureInfo.venueName,
+                    venueCity: fixtureInfo.venueCity,
+                    homeTeamId: Int(fixtureInfo.homeTeamID),
+                    homeTeamName: fixtureInfo.homeTeamName,
+                    homeTeamLogoURL: fixtureInfo.homeTeamLogoURL,
+                    awayTeamId: Int(fixtureInfo.awayTeamID),
+                    awayTeamName: fixtureInfo.awayTeamName,
+                    awayTeamLogoURL: fixtureInfo.awayTeamLogoURL,
+                    homeGoals: Int(fixtureInfo.homeGoals),
+                    awayGoals: Int(fixtureInfo.awayGoals),
+                    statusLong: fixtureInfo.statusLong,
+                    statusShort: fixtureInfo.statusShort,
+                    statusElapsed: Int(fixtureInfo.statusElapsed),
+                    leagueId: Int(leagueId),
+                    leagueName: fixtureInfo.leagueName,
+                    leagueSeason: Int(season),
+                    leagueRound: fixtureInfo.leagueRound
+                )
+            }
+
+            // Step 3: Save to cache
+            saveToCache(fixtures, key: cacheKey)
+
+            return fixtures
+        } catch {
+            lastError = error
+            throw error
+        }
+    }
+
+    // MARK: - Standings
+
+    public func getStandings(
+        forceRefresh: Bool = false
+    ) async throws -> [StandingsModel] {
+        let cacheKey = "standings_\(leagueId)_\(season)"
+
+        // Step 1: Check cache
+        if !forceRefresh, let cached = loadFromCache([StandingsModel].self, key: cacheKey) {
+            return cached
+        }
+
+        // Step 2: Fetch from server
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let response = try await service.getStandings(leagueId: leagueId, season: season)
+
+            var standings: [StandingsModel] = []
+
+            for group in response.groups {
+                for standing in group.standings {
+                    let model: StandingsModel = StandingsModel(
+                        id: "\(leagueId)_\(season)_\(standing.teamID)",
+                        leagueId: Int(leagueId),
+                        season: Int(season),
+                        groupName: group.groupName,
+                        teamId: Int(standing.teamID),
+                        teamName: standing.teamName,
+                        teamLogoURL: standing.teamLogoURL,
+                        rank: Int(standing.rank),
+                        points: Int(standing.points),
+                        played: Int(standing.all.played),
+                        win: Int(standing.all.win),
+                        draw: Int(standing.all.draw),
+                        lose: Int(standing.all.lose),
+                        goalsFor: Int(standing.all.goalsFor),
+                        goalsAgainst: Int(standing.all.goalsAgainst),
+                        goalsDiff: Int(standing.goalsDiff),
+                        form: standing.form
+                    )
+                    standings.append(model)
+                }
+            }
+
+            // Step 3: Save to cache
+            saveToCache(standings, key: cacheKey)
+
+            return standings
+        } catch {
+            lastError = error
+            throw error
+        }
+    }
+
+    // MARK: - Cache Management
+
+    public func clearCache() throws {
+        let files = try FileManager.default.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: nil
+        )
+
+        for file in files where file.pathExtension == "json" {
+            try FileManager.default.removeItem(at: file)
+        }
+
+        print("🗑️ Cache cleared")
+    }
+}
+
+// MARK: - Error
+
+public enum AFCONError: Error {
+    case noData
+    case invalidResponse
+}

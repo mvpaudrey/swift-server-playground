@@ -39,6 +39,20 @@ let package = Package(
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
             ],
             path: "Sources/AFCONClient",
+            exclude: [
+                "AFCONDataManager.swift.bak",
+                "AFCONDataManager.swift.v2",
+                "Protos/afcon.proto",
+                "Resources/export-fallback-data.sh",
+                "Resources/README.md",
+                "SWIFTDATA_CACHING_GUIDE.md",
+                "TROUBLESHOOTING.md",
+                "grpc-swift-proto-generator-config.json",
+                "Examples",
+            ],
+            resources: [
+                .process("Resources/league_fallback.json"),
+            ],
             swiftSettings: [
                 .enableUpcomingFeature("ExistentialAny"),
                 .enableExperimentalFeature("StrictConcurrency")
@@ -49,7 +63,7 @@ let package = Package(
         .target(
             name: "App",
             dependencies: [
-                .target(name: "AFCONClient"),
+                // .target(name: "AFCONClient"),  // Temporarily disabled - has grpc-swift 1.x generated code
                 .product(name: "Vapor", package: "vapor"),
                 .product(name: "Fluent", package: "fluent"),
                 .product(name: "FluentPostgresDriver", package: "fluent-postgres-driver"),
@@ -58,6 +72,12 @@ let package = Package(
                 .product(name: "GRPCProtobuf", package: "grpc-swift-protobuf"),
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
                 .product(name: "APNS", package: "APNSwift"),
+            ],
+            exclude: [
+                "Protos/afcon.proto",
+                "grpc-swift-proto-generator-config.json",
+                "gRPC/Generated/README.md",
+                "gRPC/Server/AFCONServiceProvider.swift.grpc1x.backup",
             ],
             swiftSettings: [
                 .enableUpcomingFeature("ExistentialAny"),

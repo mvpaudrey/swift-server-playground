@@ -2,13 +2,13 @@ import Foundation
 import Vapor
 
 /// Client for interacting with API-Football REST API
-public final class APIFootballClient {
+public final class APIFootballClient: @unchecked Sendable {
     private let apiKey: String
     private let baseURL: String
-    private let client: Client
+    private let client: any Client
     private let logger: Logger
 
-    public init(apiKey: String, client: Client, logger: Logger) {
+    public init(apiKey: String, client: any Client, logger: Logger) {
         self.apiKey = apiKey
         self.baseURL = "https://v3.football.api-sports.io"
         self.client = client

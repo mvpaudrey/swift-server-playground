@@ -14,10 +14,15 @@ struct APIFootballResponse<T: Content>: Content {
         case get, parameters, errors, results, paging, response
     }
 
-    init(from decoder: Decoder) throws {
+    init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         get = try container.decode(String.self, forKey: .get)
-        parameters = try container.decode([String: String].self, forKey: .parameters)
+        if let parameterDict = try? container.decode([String: String].self, forKey: .parameters) {
+            parameters = parameterDict
+        } else {
+            // API can return [] or {} when no parameters
+            parameters = [:]
+        }
         results = try container.decode(Int.self, forKey: .results)
         paging = try container.decode(Paging.self, forKey: .paging)
         response = try container.decode(T.self, forKey: .response)
@@ -158,6 +163,7 @@ struct FixtureStatusInfo: Content {
     let long: String
     let short: String
     let elapsed: Int?
+    let extra: Int?
 }
 
 struct FixtureLeague: Content {
@@ -311,7 +317,7 @@ struct StatisticValue: Content {
         return "N/A"
     }
 
-    init(from decoder: Decoder) throws {
+    init(from decoder: any Decoder) throws {
         let container = try decoder.singleValueContainer()
 
         if let intVal = try? container.decode(Int.self) {
@@ -326,7 +332,7 @@ struct StatisticValue: Content {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    func encode(to encoder: any Encoder) throws {
         var container = encoder.singleValueContainer()
         if let intVal = intValue {
             try container.encode(intVal)
@@ -385,11 +391,55 @@ struct StandingStatsInfo: Content {
     let draw: Int
     let lose: Int
     let goals: StandingGoalsInfo
+
+    enum CodingKeys: String, CodingKey {
+        case played, win, draw, lose, goals
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        played = try container.decodeIfPresent(Int.self, forKey: .played) ?? 0
+        win = try container.decodeIfPresent(Int.self, forKey: .win) ?? 0
+        draw = try container.decodeIfPresent(Int.self, forKey: .draw) ?? 0
+        lose = try container.decodeIfPresent(Int.self, forKey: .lose) ?? 0
+        goals = try container.decodeIfPresent(StandingGoalsInfo.self, forKey: .goals) ?? StandingGoalsInfo()
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(played, forKey: .played)
+        try container.encode(win, forKey: .win)
+        try container.encode(draw, forKey: .draw)
+        try container.encode(lose, forKey: .lose)
+        try container.encode(goals, forKey: .goals)
+    }
 }
 
 struct StandingGoalsInfo: Content {
     let `for`: Int
     let against: Int
+
+    enum CodingKeys: String, CodingKey {
+        case `for` = "for"
+        case against
+    }
+
+    init(`for`: Int = 0, against: Int = 0) {
+        self.`for` = `for`
+        self.against = against
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.`for` = try container.decodeIfPresent(Int.self, forKey: .for) ?? 0
+        self.against = try container.decodeIfPresent(Int.self, forKey: .against) ?? 0
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(self.`for`, forKey: .for)
+        try container.encode(against, forKey: .against)
+    }
 }
 
 // MARK: - Player Models

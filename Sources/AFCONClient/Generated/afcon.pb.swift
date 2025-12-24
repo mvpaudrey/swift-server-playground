@@ -632,11 +632,38 @@ public struct Afcon_Fixture: @unchecked Sendable {
   /// Clears the value of `score`. Subsequent reads from it will return its default value.
   public mutating func clearScore() {_uniqueStorage()._score = nil}
 
+  public var league: Afcon_FixtureLeague {
+    get {return _storage._league ?? Afcon_FixtureLeague()}
+    set {_uniqueStorage()._league = newValue}
+  }
+  /// Returns true if `league` has been explicitly set.
+  public var hasLeague: Bool {return _storage._league != nil}
+  /// Clears the value of `league`. Subsequent reads from it will return its default value.
+  public mutating func clearLeague() {_uniqueStorage()._league = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct Afcon_FixtureLeague: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: Int32 = 0
+
+  public var name: String = String()
+
+  public var season: Int32 = 0
+
+  public var round: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public struct Afcon_FixturePeriods: Sendable {
@@ -679,6 +706,8 @@ public struct Afcon_FixtureStatus: Sendable {
   public var short: String = String()
 
   public var elapsed: Int32 = 0
+
+  public var extra: Int32 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1610,6 +1639,208 @@ public struct Afcon_UnregisterDeviceResponse: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+}
+
+/// Start Live Activity
+public struct Afcon_StartLiveActivityRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var deviceUuid: String = String()
+
+  public var fixtureID: Int32 = 0
+
+  /// iOS ActivityKit ID
+  public var activityID: String = String()
+
+  /// Push-to-update token
+  public var pushToken: String = String()
+
+  /// "every_minute", "goals_only", "major_events", "all_events"
+  public var updateFrequency: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct Afcon_StartLiveActivityResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var success: Bool = false
+
+  public var message: String = String()
+
+  /// Server-assigned UUID
+  public var activityUuid: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Update Live Activity Preferences
+public struct Afcon_UpdateLiveActivityRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var activityUuid: String = String()
+
+  /// Change update frequency
+  public var updateFrequency: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct Afcon_UpdateLiveActivityResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var success: Bool = false
+
+  public var message: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// End Live Activity
+public struct Afcon_EndLiveActivityRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var activityUuid: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct Afcon_EndLiveActivityResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var success: Bool = false
+
+  public var message: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Get Active Live Activities
+public struct Afcon_GetActiveLiveActivitiesRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var deviceUuid: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct Afcon_GetActiveLiveActivitiesResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var activities: [Afcon_LiveActivityInfo] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct Afcon_LiveActivityInfo: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var activityUuid: String = String()
+
+  public var fixtureID: Int32 = 0
+
+  public var activityID: String = String()
+
+  public var updateFrequency: String = String()
+
+  public var startedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {return _startedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_startedAt = newValue}
+  }
+  /// Returns true if `startedAt` has been explicitly set.
+  public var hasStartedAt: Bool {return self._startedAt != nil}
+  /// Clears the value of `startedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearStartedAt() {self._startedAt = nil}
+
+  public var expiresAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {return _expiresAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_expiresAt = newValue}
+  }
+  /// Returns true if `expiresAt` has been explicitly set.
+  public var hasExpiresAt: Bool {return self._expiresAt != nil}
+  /// Clears the value of `expiresAt`. Subsequent reads from it will return its default value.
+  public mutating func clearExpiresAt() {self._expiresAt = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _startedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+  fileprivate var _expiresAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+}
+
+/// Live Activity Content State (for push updates)
+public struct Afcon_LiveActivityContentState: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var fixtureID: Int32 = 0
+
+  public var homeTeam: String = String()
+
+  public var awayTeam: String = String()
+
+  public var homeScore: Int32 = 0
+
+  public var awayScore: Int32 = 0
+
+  /// "NS", "1H", "HT", "2H", "ET", "FT"
+  public var status: String = String()
+
+  public var elapsed: Int32 = 0
+
+  /// "Goal by Salah 45'", "Red Card 67'", etc.
+  public var lastEvent: String = String()
+
+  public var updatedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {return _updatedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_updatedAt = newValue}
+  }
+  /// Returns true if `updatedAt` has been explicitly set.
+  public var hasUpdatedAt: Bool {return self._updatedAt != nil}
+  /// Clears the value of `updatedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearUpdatedAt() {self._updatedAt = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _updatedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
 }
 
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
@@ -2667,7 +2898,7 @@ extension Afcon_NextUpcomingRequest: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 extension Afcon_Fixture: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Fixture"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}referee\0\u{1}timezone\0\u{1}date\0\u{1}timestamp\0\u{1}periods\0\u{1}venue\0\u{1}status\0\u{1}teams\0\u{1}goals\0\u{1}score\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}referee\0\u{1}timezone\0\u{1}date\0\u{1}timestamp\0\u{1}periods\0\u{1}venue\0\u{1}status\0\u{1}teams\0\u{1}goals\0\u{1}score\0\u{1}league\0")
 
   fileprivate class _StorageClass {
     var _id: Int32 = 0
@@ -2681,6 +2912,7 @@ extension Afcon_Fixture: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
     var _teams: Afcon_FixtureTeams? = nil
     var _goals: Afcon_FixtureGoals? = nil
     var _score: Afcon_FixtureScore? = nil
+    var _league: Afcon_FixtureLeague? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -2702,6 +2934,7 @@ extension Afcon_Fixture: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
       _teams = source._teams
       _goals = source._goals
       _score = source._score
+      _league = source._league
     }
   }
 
@@ -2731,6 +2964,7 @@ extension Afcon_Fixture: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
         case 9: try { try decoder.decodeSingularMessageField(value: &_storage._teams) }()
         case 10: try { try decoder.decodeSingularMessageField(value: &_storage._goals) }()
         case 11: try { try decoder.decodeSingularMessageField(value: &_storage._score) }()
+        case 12: try { try decoder.decodeSingularMessageField(value: &_storage._league) }()
         default: break
         }
       }
@@ -2776,6 +3010,9 @@ extension Afcon_Fixture: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
       try { if let v = _storage._score {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
       } }()
+      try { if let v = _storage._league {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -2796,10 +3033,56 @@ extension Afcon_Fixture: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
         if _storage._teams != rhs_storage._teams {return false}
         if _storage._goals != rhs_storage._goals {return false}
         if _storage._score != rhs_storage._score {return false}
+        if _storage._league != rhs_storage._league {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Afcon_FixtureLeague: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".FixtureLeague"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}name\0\u{1}season\0\u{1}round\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt32Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.season) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.round) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.id != 0 {
+      try visitor.visitSingularInt32Field(value: self.id, fieldNumber: 1)
+    }
+    if !self.name.isEmpty {
+      try visitor.visitSingularStringField(value: self.name, fieldNumber: 2)
+    }
+    if self.season != 0 {
+      try visitor.visitSingularInt32Field(value: self.season, fieldNumber: 3)
+    }
+    if !self.round.isEmpty {
+      try visitor.visitSingularStringField(value: self.round, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Afcon_FixtureLeague, rhs: Afcon_FixtureLeague) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.name != rhs.name {return false}
+    if lhs.season != rhs.season {return false}
+    if lhs.round != rhs.round {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2882,7 +3165,7 @@ extension Afcon_FixtureVenue: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 
 extension Afcon_FixtureStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".FixtureStatus"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}long\0\u{1}short\0\u{1}elapsed\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}long\0\u{1}short\0\u{1}elapsed\0\u{1}extra\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2893,6 +3176,7 @@ extension Afcon_FixtureStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       case 1: try { try decoder.decodeSingularStringField(value: &self.long) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.short) }()
       case 3: try { try decoder.decodeSingularInt32Field(value: &self.elapsed) }()
+      case 4: try { try decoder.decodeSingularInt32Field(value: &self.extra) }()
       default: break
       }
     }
@@ -2908,6 +3192,9 @@ extension Afcon_FixtureStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     if self.elapsed != 0 {
       try visitor.visitSingularInt32Field(value: self.elapsed, fieldNumber: 3)
     }
+    if self.extra != 0 {
+      try visitor.visitSingularInt32Field(value: self.extra, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2915,6 +3202,7 @@ extension Afcon_FixtureStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     if lhs.long != rhs.long {return false}
     if lhs.short != rhs.short {return false}
     if lhs.elapsed != rhs.elapsed {return false}
+    if lhs.extra != rhs.extra {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -4734,6 +5022,424 @@ extension Afcon_UnregisterDeviceResponse: SwiftProtobuf.Message, SwiftProtobuf._
   public static func ==(lhs: Afcon_UnregisterDeviceResponse, rhs: Afcon_UnregisterDeviceResponse) -> Bool {
     if lhs.success != rhs.success {return false}
     if lhs.message != rhs.message {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Afcon_StartLiveActivityRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".StartLiveActivityRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}device_uuid\0\u{3}fixture_id\0\u{3}activity_id\0\u{3}push_token\0\u{3}update_frequency\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.deviceUuid) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.fixtureID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.activityID) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.pushToken) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.updateFrequency) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.deviceUuid.isEmpty {
+      try visitor.visitSingularStringField(value: self.deviceUuid, fieldNumber: 1)
+    }
+    if self.fixtureID != 0 {
+      try visitor.visitSingularInt32Field(value: self.fixtureID, fieldNumber: 2)
+    }
+    if !self.activityID.isEmpty {
+      try visitor.visitSingularStringField(value: self.activityID, fieldNumber: 3)
+    }
+    if !self.pushToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.pushToken, fieldNumber: 4)
+    }
+    if !self.updateFrequency.isEmpty {
+      try visitor.visitSingularStringField(value: self.updateFrequency, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Afcon_StartLiveActivityRequest, rhs: Afcon_StartLiveActivityRequest) -> Bool {
+    if lhs.deviceUuid != rhs.deviceUuid {return false}
+    if lhs.fixtureID != rhs.fixtureID {return false}
+    if lhs.activityID != rhs.activityID {return false}
+    if lhs.pushToken != rhs.pushToken {return false}
+    if lhs.updateFrequency != rhs.updateFrequency {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Afcon_StartLiveActivityResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".StartLiveActivityResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}success\0\u{1}message\0\u{3}activity_uuid\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.success) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.message) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.activityUuid) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.success != false {
+      try visitor.visitSingularBoolField(value: self.success, fieldNumber: 1)
+    }
+    if !self.message.isEmpty {
+      try visitor.visitSingularStringField(value: self.message, fieldNumber: 2)
+    }
+    if !self.activityUuid.isEmpty {
+      try visitor.visitSingularStringField(value: self.activityUuid, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Afcon_StartLiveActivityResponse, rhs: Afcon_StartLiveActivityResponse) -> Bool {
+    if lhs.success != rhs.success {return false}
+    if lhs.message != rhs.message {return false}
+    if lhs.activityUuid != rhs.activityUuid {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Afcon_UpdateLiveActivityRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".UpdateLiveActivityRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}activity_uuid\0\u{3}update_frequency\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.activityUuid) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.updateFrequency) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.activityUuid.isEmpty {
+      try visitor.visitSingularStringField(value: self.activityUuid, fieldNumber: 1)
+    }
+    if !self.updateFrequency.isEmpty {
+      try visitor.visitSingularStringField(value: self.updateFrequency, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Afcon_UpdateLiveActivityRequest, rhs: Afcon_UpdateLiveActivityRequest) -> Bool {
+    if lhs.activityUuid != rhs.activityUuid {return false}
+    if lhs.updateFrequency != rhs.updateFrequency {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Afcon_UpdateLiveActivityResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".UpdateLiveActivityResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}success\0\u{1}message\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.success) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.message) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.success != false {
+      try visitor.visitSingularBoolField(value: self.success, fieldNumber: 1)
+    }
+    if !self.message.isEmpty {
+      try visitor.visitSingularStringField(value: self.message, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Afcon_UpdateLiveActivityResponse, rhs: Afcon_UpdateLiveActivityResponse) -> Bool {
+    if lhs.success != rhs.success {return false}
+    if lhs.message != rhs.message {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Afcon_EndLiveActivityRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".EndLiveActivityRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}activity_uuid\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.activityUuid) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.activityUuid.isEmpty {
+      try visitor.visitSingularStringField(value: self.activityUuid, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Afcon_EndLiveActivityRequest, rhs: Afcon_EndLiveActivityRequest) -> Bool {
+    if lhs.activityUuid != rhs.activityUuid {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Afcon_EndLiveActivityResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".EndLiveActivityResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}success\0\u{1}message\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.success) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.message) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.success != false {
+      try visitor.visitSingularBoolField(value: self.success, fieldNumber: 1)
+    }
+    if !self.message.isEmpty {
+      try visitor.visitSingularStringField(value: self.message, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Afcon_EndLiveActivityResponse, rhs: Afcon_EndLiveActivityResponse) -> Bool {
+    if lhs.success != rhs.success {return false}
+    if lhs.message != rhs.message {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Afcon_GetActiveLiveActivitiesRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetActiveLiveActivitiesRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}device_uuid\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.deviceUuid) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.deviceUuid.isEmpty {
+      try visitor.visitSingularStringField(value: self.deviceUuid, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Afcon_GetActiveLiveActivitiesRequest, rhs: Afcon_GetActiveLiveActivitiesRequest) -> Bool {
+    if lhs.deviceUuid != rhs.deviceUuid {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Afcon_GetActiveLiveActivitiesResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetActiveLiveActivitiesResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}activities\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.activities) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.activities.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.activities, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Afcon_GetActiveLiveActivitiesResponse, rhs: Afcon_GetActiveLiveActivitiesResponse) -> Bool {
+    if lhs.activities != rhs.activities {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Afcon_LiveActivityInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".LiveActivityInfo"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}activity_uuid\0\u{3}fixture_id\0\u{3}activity_id\0\u{3}update_frequency\0\u{3}started_at\0\u{3}expires_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.activityUuid) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.fixtureID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.activityID) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.updateFrequency) }()
+      case 5: try { try decoder.decodeSingularMessageField(value: &self._startedAt) }()
+      case 6: try { try decoder.decodeSingularMessageField(value: &self._expiresAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.activityUuid.isEmpty {
+      try visitor.visitSingularStringField(value: self.activityUuid, fieldNumber: 1)
+    }
+    if self.fixtureID != 0 {
+      try visitor.visitSingularInt32Field(value: self.fixtureID, fieldNumber: 2)
+    }
+    if !self.activityID.isEmpty {
+      try visitor.visitSingularStringField(value: self.activityID, fieldNumber: 3)
+    }
+    if !self.updateFrequency.isEmpty {
+      try visitor.visitSingularStringField(value: self.updateFrequency, fieldNumber: 4)
+    }
+    try { if let v = self._startedAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    } }()
+    try { if let v = self._expiresAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Afcon_LiveActivityInfo, rhs: Afcon_LiveActivityInfo) -> Bool {
+    if lhs.activityUuid != rhs.activityUuid {return false}
+    if lhs.fixtureID != rhs.fixtureID {return false}
+    if lhs.activityID != rhs.activityID {return false}
+    if lhs.updateFrequency != rhs.updateFrequency {return false}
+    if lhs._startedAt != rhs._startedAt {return false}
+    if lhs._expiresAt != rhs._expiresAt {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Afcon_LiveActivityContentState: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".LiveActivityContentState"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}fixture_id\0\u{3}home_team\0\u{3}away_team\0\u{3}home_score\0\u{3}away_score\0\u{1}status\0\u{1}elapsed\0\u{3}last_event\0\u{3}updated_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt32Field(value: &self.fixtureID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.homeTeam) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.awayTeam) }()
+      case 4: try { try decoder.decodeSingularInt32Field(value: &self.homeScore) }()
+      case 5: try { try decoder.decodeSingularInt32Field(value: &self.awayScore) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.status) }()
+      case 7: try { try decoder.decodeSingularInt32Field(value: &self.elapsed) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.lastEvent) }()
+      case 9: try { try decoder.decodeSingularMessageField(value: &self._updatedAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.fixtureID != 0 {
+      try visitor.visitSingularInt32Field(value: self.fixtureID, fieldNumber: 1)
+    }
+    if !self.homeTeam.isEmpty {
+      try visitor.visitSingularStringField(value: self.homeTeam, fieldNumber: 2)
+    }
+    if !self.awayTeam.isEmpty {
+      try visitor.visitSingularStringField(value: self.awayTeam, fieldNumber: 3)
+    }
+    if self.homeScore != 0 {
+      try visitor.visitSingularInt32Field(value: self.homeScore, fieldNumber: 4)
+    }
+    if self.awayScore != 0 {
+      try visitor.visitSingularInt32Field(value: self.awayScore, fieldNumber: 5)
+    }
+    if !self.status.isEmpty {
+      try visitor.visitSingularStringField(value: self.status, fieldNumber: 6)
+    }
+    if self.elapsed != 0 {
+      try visitor.visitSingularInt32Field(value: self.elapsed, fieldNumber: 7)
+    }
+    if !self.lastEvent.isEmpty {
+      try visitor.visitSingularStringField(value: self.lastEvent, fieldNumber: 8)
+    }
+    try { if let v = self._updatedAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Afcon_LiveActivityContentState, rhs: Afcon_LiveActivityContentState) -> Bool {
+    if lhs.fixtureID != rhs.fixtureID {return false}
+    if lhs.homeTeam != rhs.homeTeam {return false}
+    if lhs.awayTeam != rhs.awayTeam {return false}
+    if lhs.homeScore != rhs.homeScore {return false}
+    if lhs.awayScore != rhs.awayScore {return false}
+    if lhs.status != rhs.status {return false}
+    if lhs.elapsed != rhs.elapsed {return false}
+    if lhs.lastEvent != rhs.lastEvent {return false}
+    if lhs._updatedAt != rhs._updatedAt {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

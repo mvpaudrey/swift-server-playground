@@ -12,6 +12,7 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
     private let fixtureRepository: FixtureRepository
     private let notificationService: NotificationService?
     private let deviceRepository: DeviceRepository
+    private let broadcaster: LiveMatchBroadcaster
     private let logger: Logger
     private var standingsRefreshTasks: [String: Task<Void, Never>] = [:]
     private let standingsTasksLock = NSLock()
@@ -22,6 +23,7 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
         fixtureRepository: FixtureRepository,
         notificationService: NotificationService?,
         deviceRepository: DeviceRepository,
+        broadcaster: LiveMatchBroadcaster,
         logger: Logger
     ) {
         self.apiClient = apiClient
@@ -29,6 +31,7 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
         self.fixtureRepository = fixtureRepository
         self.notificationService = notificationService
         self.deviceRepository = deviceRepository
+        self.broadcaster = broadcaster
         self.logger = logger
     }
 
@@ -317,7 +320,7 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
             }
         }
 
-        var lastError: Error?
+        var lastError: (any Error)?
 
         if let leagueID = leagueID, let season = season {
             do {
@@ -381,20 +384,58 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
         return ServerResponse(message: response)
     }
 
-    /// Stream live match updates
+    /// Stream live match updates using centralized broadcaster
+    /// This method now subscribes to the LiveMatchBroadcaster instead of polling directly
+    /// Scales to 10k+ concurrent clients by sharing a single poller
     public func streamLiveMatches(
         request: ServerRequest<Afcon_LiveMatchRequest>,
         context: ServerContext
     ) async throws -> StreamingServerResponse<Afcon_LiveMatchUpdate> {
         let req = request.message
-        let isPaused = req.leagueID == 6 // Only pause AFCON (league 6)
+        let subscriberCount = broadcaster.getSubscriberCount(for: Int(req.leagueID))
+
+        logger.info("📱 gRPC: StreamLiveMatches - league=\(req.leagueID), season=\(req.season) [Client \(subscriberCount + 1) connecting]")
+
+        return StreamingServerResponse { writer in
+            // Subscribe to the centralized broadcaster
+            // This returns an AsyncStream that receives updates when the broadcaster detects changes
+            let updateStream = self.broadcaster.subscribe(
+                leagueID: Int(req.leagueID),
+                season: Int(req.season)
+            )
+
+            // Simply relay updates from broadcaster to this client
+            for await update in updateStream {
+                do {
+                    try await writer.write(update)
+                } catch {
+                    self.logger.error("Failed to write update to client: \(error)")
+                    break
+                }
+            }
+
+            self.logger.info("📱 Client disconnected from league \(req.leagueID)")
+            return [:] // Return empty metadata
+        }
+    }
+
+    // Legacy method - kept for reference but no longer used
+    // The broadcaster handles all the logic below
+    private func streamLiveMatchesLegacy_UNUSED(
+        request: ServerRequest<Afcon_LiveMatchRequest>,
+        context: ServerContext
+    ) async throws -> StreamingServerResponse<Afcon_LiveMatchUpdate> {
+        let req = request.message
+        let pauseAfconEnv = Environment.get("PAUSE_AFCON_LIVE_MATCHES")?.lowercased()
+        let shouldPauseAfcon = pauseAfconEnv == "1" || pauseAfconEnv == "true" || pauseAfconEnv == "yes"
+        let isPaused = shouldPauseAfcon && req.leagueID == 6
         self.logger.info("gRPC: StreamLiveMatches - league=\(req.leagueID)\(isPaused ? " - PAUSED" : "")")
 
         return StreamingServerResponse { writer in
 
         var previousFixtures: [Int: FixtureData] = [:]
-        var previousEvents: [Int: [FixtureEvent]] = [:] // Track events per fixture
-        let activePollingInterval: UInt64 = 15_000_000_000 // 15 seconds when checking for live matches
+        var previousEvents: [Int: [FixtureEvent]] = [:]
+        let activePollingInterval: UInt64 = 15_000_000_000
 
         var lastNoLiveCheckTime: Date?
         var nextFixtureTimestamp: Int?
@@ -550,18 +591,18 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
                                     // Send goal notification
                                     Task {
                                         do {
-//                                             try await self.notificationService?.sendGoalNotification(
-//                                                 fixtureId: fixtureID,
-//                                                 homeTeam: fixture.teams.home.name,
-//                                                 awayTeam: fixture.teams.away.name,
-//                                                 homeGoals: fixture.goals.home ?? 0,
-//                                                 awayGoals: fixture.goals.away ?? 0,
-//                                                 scorer: playerName,
-//                                                 assist: newEvent.assist?.name,
-//                                                 minute: elapsed,
-//                                                 leagueId: Int(req.leagueID),
-//                                                 season: Int(req.season)
-//                                             )
+                                            try await self.notificationService?.sendGoalNotification(
+                                                fixtureId: fixtureID,
+                                                homeTeam: fixture.teams.home.name,
+                                                awayTeam: fixture.teams.away.name,
+                                                homeGoals: fixture.goals.home ?? 0,
+                                                awayGoals: fixture.goals.away ?? 0,
+                                                scorer: playerName,
+                                                assist: newEvent.assist?.name,
+                                                minute: elapsed,
+                                                leagueId: Int(req.leagueID),
+                                                season: Int(req.season)
+                                            )
                                         } catch {
                                             self.logger.error("Failed to send goal notification: \(error)")
                                         }
@@ -582,16 +623,16 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
                                     if eventDetail.lowercased().contains("red") {
                                         Task {
                                             do {
-//                                                 try await self.notificationService?.sendRedCardNotification(
-//                                                     fixtureId: fixtureID,
-//                                                     homeTeam: fixture.teams.home.name,
-//                                                     awayTeam: fixture.teams.away.name,
-//                                                     player: playerName,
-//                                                     team: teamName,
-//                                                     minute: elapsed,
-//                                                     leagueId: Int(req.leagueID),
-//                                                     season: Int(req.season)
-//                                                 )
+                                                try await self.notificationService?.sendRedCardNotification(
+                                                    fixtureId: fixtureID,
+                                                    homeTeam: fixture.teams.home.name,
+                                                    awayTeam: fixture.teams.away.name,
+                                                    playerName: playerName,
+                                                    teamName: teamName,
+                                                    minute: elapsed,
+                                                    leagueId: Int(req.leagueID),
+                                                    season: Int(req.season)
+                                                )
                                             } catch {
                                                 self.logger.error("Failed to send red card notification: \(error)")
                                             }
@@ -643,6 +684,17 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
                             events: currentEvents,
                             currentElapsed: fixture.fixture.status.elapsed ?? 0
                         )
+
+                        if !currentEvents.isEmpty {
+                            self.logger.info("📌 Fixture \(fixtureID): \(currentEvents.count) existing events on first detection")
+                            for (index, event) in currentEvents.enumerated() {
+                                let elapsed = event.time?.elapsed ?? 0
+                                let eventType = event.type ?? "unknown"
+                                let eventDetail = event.detail ?? ""
+                                let playerName = event.player?.name ?? "Unknown Player"
+                                self.logger.info("   Existing Event \(index + 1): \(elapsed)' \(eventType) - \(playerName) \(eventDetail)")
+                            }
+                        }
 
                         // Attach latest event if available
                         if let latestEvent = currentEvents.last {
@@ -714,6 +766,44 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
                     }
                 }
 
+                // Check for halftime status and adjust polling interval
+                let halftimeFixtures = liveFixtures.filter { $0.fixture.status.short == "HT" }
+                if !halftimeFixtures.isEmpty && !isPaused {
+                    // Find the fixture with the longest elapsed time (most likely to resume first)
+                    if let halftimeFixture = halftimeFixtures.max(by: { ($0.fixture.status.elapsed ?? 0) < ($1.fixture.status.elapsed ?? 0) }) {
+                        let elapsed = halftimeFixture.fixture.status.elapsed ?? 45
+                        let extraTime = halftimeFixture.fixture.periods.first ?? 45
+
+                        // Calculate expected second half start time
+                        // elapsed time + 14 minutes halftime break
+                        let expectedSecondHalfMinutes = elapsed + 14
+                        let timeUntilSecondHalf = (expectedSecondHalfMinutes - elapsed) * 60 // Convert to seconds
+
+                        if timeUntilSecondHalf > 60 {
+                            // More than 1 minute until second half, pause polling
+                            let pauseSeconds = max(0, timeUntilSecondHalf - 30) // Resume 30 seconds before expected start
+                            sleepInterval = UInt64(pauseSeconds) * 1_000_000_000
+
+                            let minutes = pauseSeconds / 60
+                            let seconds = pauseSeconds % 60
+
+                            self.logger.info("⏸️ HALFTIME detected for fixture \(halftimeFixture.fixture.id)")
+                            self.logger.info("  ⚽ Match: \(halftimeFixture.teams.home.name) \(halftimeFixture.goals.home ?? 0)-\(halftimeFixture.goals.away ?? 0) \(halftimeFixture.teams.away.name)")
+                            self.logger.info("  ⏱️ Elapsed: \(elapsed)' | Extra time: \(extraTime - 45)'")
+                            self.logger.info("  🕐 Expected 2nd half start: ~\(expectedSecondHalfMinutes)' mark")
+                            self.logger.info("  💤 Pausing polling for \(minutes)m \(seconds)s (will resume 30s before expected start)")
+                        } else if timeUntilSecondHalf > 0 {
+                            // Less than 1 minute, keep active polling but log
+                            sleepInterval = activePollingInterval
+                            self.logger.info("⏰ HALFTIME ending soon for fixture \(halftimeFixture.fixture.id) - keeping active polling")
+                        } else {
+                            // Second half should have started, switch to active polling
+                            sleepInterval = activePollingInterval
+                            self.logger.info("🔄 Expected 2nd half time reached for fixture \(halftimeFixture.fixture.id) - resuming active polling")
+                        }
+                    }
+                }
+
                 try await Task.sleep(nanoseconds: sleepInterval)
             } catch {
                 self.logger.error("Error in live stream: \(error)")
@@ -729,9 +819,16 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
     private func getNextUpcomingFixtureTimestamp(leagueId: Int, season: Int) async -> Int? {
         do {
             // Query database for next upcoming fixture timestamp
-            return try await fixtureRepository.getNextUpcomingTimestamp(leagueId: leagueId, season: season)
+            logger.info("🔍 Querying for next fixture: leagueId=\(leagueId), season=\(season)")
+            let timestamp = try await fixtureRepository.getNextUpcomingTimestamp(leagueId: leagueId, season: season)
+            if let timestamp = timestamp {
+                logger.info("✅ Found next fixture at timestamp: \(timestamp)")
+            } else {
+                logger.warning("⚠️ No upcoming fixture found for leagueId=\(leagueId), season=\(season)")
+            }
+            return timestamp
         } catch {
-            logger.error("Failed to fetch next fixture timestamp from database: \(error)")
+            logger.error("❌ Failed to fetch next fixture timestamp from database: \(error)")
             return nil
         }
     }
@@ -1453,6 +1550,7 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
         protoStatus.long = status.long
         protoStatus.short = status.short
         protoStatus.elapsed = Int32(status.elapsed ?? 0)
+        protoStatus.extra = Int32(status.extra ?? 0)
         return protoStatus
     }
 
@@ -1715,5 +1813,182 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
         response.message = "Device unregistered successfully"
 
         return ServerResponse(message: response)
+    }
+
+    // MARK: - Live Activity Management
+
+    /// Start a Live Activity for a fixture
+    public func startLiveActivity(
+        request: ServerRequest<Afcon_StartLiveActivityRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_StartLiveActivityResponse> {
+        let req = request.message
+        logger.info("gRPC: StartLiveActivity - fixture=\(req.fixtureID), device=\(req.deviceUuid)")
+
+        guard let deviceUUID = UUID(uuidString: req.deviceUuid) else {
+            var response = Afcon_StartLiveActivityResponse()
+            response.success = false
+            response.message = "Invalid device UUID"
+            return ServerResponse(message: response)
+        }
+
+        guard let notificationService = notificationService else {
+            var response = Afcon_StartLiveActivityResponse()
+            response.success = false
+            response.message = "Notification service not available"
+            return ServerResponse(message: response)
+        }
+
+        do {
+            let activity = try await notificationService.startLiveActivity(
+                deviceUUID: deviceUUID,
+                fixtureId: Int(req.fixtureID),
+                activityId: req.activityID,
+                pushToken: req.pushToken,
+                updateFrequency: req.updateFrequency
+            )
+
+            var response = Afcon_StartLiveActivityResponse()
+            response.success = true
+            response.message = "Live Activity started successfully"
+            response.activityUuid = activity.id?.uuidString ?? ""
+
+            return ServerResponse(message: response)
+        } catch {
+            logger.error("Failed to start Live Activity: \(error)")
+
+            var response = Afcon_StartLiveActivityResponse()
+            response.success = false
+            response.message = "Failed to start Live Activity: \(error.localizedDescription)"
+            return ServerResponse(message: response)
+        }
+    }
+
+    /// Update Live Activity preferences
+    public func updateLiveActivity(
+        request: ServerRequest<Afcon_UpdateLiveActivityRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_UpdateLiveActivityResponse> {
+        let req = request.message
+        logger.info("gRPC: UpdateLiveActivity - activity=\(req.activityUuid)")
+
+        guard let activityUUID = UUID(uuidString: req.activityUuid) else {
+            var response = Afcon_UpdateLiveActivityResponse()
+            response.success = false
+            response.message = "Invalid activity UUID"
+            return ServerResponse(message: response)
+        }
+
+        guard let notificationService = notificationService else {
+            var response = Afcon_UpdateLiveActivityResponse()
+            response.success = false
+            response.message = "Notification service not available"
+            return ServerResponse(message: response)
+        }
+
+        do {
+            try await notificationService.updateLiveActivityFrequency(
+                activityUUID: activityUUID,
+                updateFrequency: req.updateFrequency
+            )
+
+            var response = Afcon_UpdateLiveActivityResponse()
+            response.success = true
+            response.message = "Live Activity updated successfully"
+
+            return ServerResponse(message: response)
+        } catch {
+            logger.error("Failed to update Live Activity: \(error)")
+
+            var response = Afcon_UpdateLiveActivityResponse()
+            response.success = false
+            response.message = "Failed to update Live Activity: \(error.localizedDescription)"
+            return ServerResponse(message: response)
+        }
+    }
+
+    /// End a Live Activity
+    public func endLiveActivity(
+        request: ServerRequest<Afcon_EndLiveActivityRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_EndLiveActivityResponse> {
+        let req = request.message
+        logger.info("gRPC: EndLiveActivity - activity=\(req.activityUuid)")
+
+        guard let activityUUID = UUID(uuidString: req.activityUuid) else {
+            var response = Afcon_EndLiveActivityResponse()
+            response.success = false
+            response.message = "Invalid activity UUID"
+            return ServerResponse(message: response)
+        }
+
+        guard let notificationService = notificationService else {
+            var response = Afcon_EndLiveActivityResponse()
+            response.success = false
+            response.message = "Notification service not available"
+            return ServerResponse(message: response)
+        }
+
+        do {
+            try await notificationService.endLiveActivity(activityUUID: activityUUID)
+
+            var response = Afcon_EndLiveActivityResponse()
+            response.success = true
+            response.message = "Live Activity ended successfully"
+
+            return ServerResponse(message: response)
+        } catch {
+            logger.error("Failed to end Live Activity: \(error)")
+
+            var response = Afcon_EndLiveActivityResponse()
+            response.success = false
+            response.message = "Failed to end Live Activity: \(error.localizedDescription)"
+            return ServerResponse(message: response)
+        }
+    }
+
+    /// Get active Live Activities for a device
+    public func getActiveLiveActivities(
+        request: ServerRequest<Afcon_GetActiveLiveActivitiesRequest>,
+        context: ServerContext
+    ) async throws -> ServerResponse<Afcon_GetActiveLiveActivitiesResponse> {
+        let req = request.message
+        logger.info("gRPC: GetActiveLiveActivities - device=\(req.deviceUuid)")
+
+        guard let deviceUUID = UUID(uuidString: req.deviceUuid) else {
+            var response = Afcon_GetActiveLiveActivitiesResponse()
+            return ServerResponse(message: response)
+        }
+
+        guard let notificationService = notificationService else {
+            var response = Afcon_GetActiveLiveActivitiesResponse()
+            return ServerResponse(message: response)
+        }
+
+        do {
+            let activities = try await notificationService.getActiveLiveActivities(deviceUUID: deviceUUID)
+
+            var response = Afcon_GetActiveLiveActivitiesResponse()
+            response.activities = activities.map { activity in
+                var info = Afcon_LiveActivityInfo()
+                info.activityUuid = activity.id?.uuidString ?? ""
+                info.fixtureID = Int32(activity.fixtureId)
+                info.activityID = activity.activityId
+                info.updateFrequency = activity.updateFrequency
+                info.startedAt = Google_Protobuf_Timestamp(date: activity.startedAt)
+                if let expiresAt = activity.expiresAt {
+                    info.expiresAt = Google_Protobuf_Timestamp(date: expiresAt)
+                }
+
+                return info
+            }
+
+            return ServerResponse(message: response)
+        } catch {
+            logger.error("Failed to get active Live Activities: \(error)")
+
+            var response = Afcon_GetActiveLiveActivitiesResponse()
+            return ServerResponse(message: response)
+        }
     }
 }

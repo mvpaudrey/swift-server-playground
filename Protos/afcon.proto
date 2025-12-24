@@ -51,6 +51,12 @@ service AFCONService {
   rpc GetSubscriptions(GetSubscriptionsRequest) returns (GetSubscriptionsResponse);
   rpc UnregisterDevice(UnregisterDeviceRequest) returns (UnregisterDeviceResponse);
   rpc UpdateDeviceToken(UpdateDeviceTokenRequest) returns (UpdateDeviceTokenResponse);
+
+  // Live Activity Management
+  rpc StartLiveActivity(StartLiveActivityRequest) returns (StartLiveActivityResponse);
+  rpc UpdateLiveActivity(UpdateLiveActivityRequest) returns (UpdateLiveActivityResponse);
+  rpc EndLiveActivity(EndLiveActivityRequest) returns (EndLiveActivityResponse);
+  rpc GetActiveLiveActivities(GetActiveLiveActivitiesRequest) returns (GetActiveLiveActivitiesResponse);
 }
 
 // League Request/Response
@@ -231,6 +237,14 @@ message Fixture {
   FixtureTeams teams = 9;
   FixtureGoals goals = 10;
   FixtureScore score = 11;
+  FixtureLeague league = 12;
+}
+
+message FixtureLeague {
+  int32 id = 1;
+  string name = 2;
+  int32 season = 3;
+  string round = 4;
 }
 
 message FixturePeriods {
@@ -248,6 +262,7 @@ message FixtureStatus {
   string long = 1;
   string short = 2;
   int32 elapsed = 3;
+  int32 extra = 4;
 }
 
 message FixtureTeams {
@@ -515,4 +530,75 @@ message UnregisterDeviceRequest {
 message UnregisterDeviceResponse {
   bool success = 1;
   string message = 2;
+}
+
+// ============================================================================
+// Live Activity Messages
+// ============================================================================
+
+// Start Live Activity
+message StartLiveActivityRequest {
+  string device_uuid = 1;
+  int32 fixture_id = 2;
+  string activity_id = 3;  // iOS ActivityKit ID
+  string push_token = 4;   // Push-to-update token
+  string update_frequency = 5;  // "every_minute", "goals_only", "major_events", "all_events"
+}
+
+message StartLiveActivityResponse {
+  bool success = 1;
+  string message = 2;
+  string activity_uuid = 3;  // Server-assigned UUID
+}
+
+// Update Live Activity Preferences
+message UpdateLiveActivityRequest {
+  string activity_uuid = 1;
+  string update_frequency = 2;  // Change update frequency
+}
+
+message UpdateLiveActivityResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// End Live Activity
+message EndLiveActivityRequest {
+  string activity_uuid = 1;
+}
+
+message EndLiveActivityResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Get Active Live Activities
+message GetActiveLiveActivitiesRequest {
+  string device_uuid = 1;
+}
+
+message GetActiveLiveActivitiesResponse {
+  repeated LiveActivityInfo activities = 1;
+}
+
+message LiveActivityInfo {
+  string activity_uuid = 1;
+  int32 fixture_id = 2;
+  string activity_id = 3;
+  string update_frequency = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp expires_at = 6;
+}
+
+// Live Activity Content State (for push updates)
+message LiveActivityContentState {
+  int32 fixture_id = 1;
+  string home_team = 2;
+  string away_team = 3;
+  int32 home_score = 4;
+  int32 away_score = 5;
+  string status = 6;  // "NS", "1H", "HT", "2H", "ET", "FT"
+  int32 elapsed = 7;
+  string last_event = 8;  // "Goal by Salah 45'", "Red Card 67'", etc.
+  google.protobuf.Timestamp updated_at = 9;
 }

@@ -4,10 +4,10 @@ import Fluent
 
 /// Repository for managing device registrations and notification subscriptions
 public final class DeviceRepository {
-    private let db: Database
+    private let db: any Database
     private let logger: Logger
 
-    public init(db: Database, logger: Logger) {
+    public init(db: any Database, logger: Logger) {
         self.db = db
         self.logger = logger
     }

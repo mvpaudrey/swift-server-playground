@@ -6,10 +6,29 @@ echo ""
 
 # Check if Redis is running
 echo "📡 Checking Redis..."
+if ! command -v redis-cli >/dev/null 2>&1; then
+    echo "❌ redis-cli not found. Install Redis with Homebrew: brew install redis"
+    exit 1
+fi
+
 if ! redis-cli ping > /dev/null 2>&1; then
     echo "⚠️  Redis is not running. Starting Redis..."
-    brew services start redis
-    sleep 2
+    if command -v brew >/dev/null 2>&1; then
+        if ! brew services start redis >/dev/null 2>&1; then
+            echo "❌ Failed to start Redis via Homebrew services."
+            echo "   Try starting Redis manually: redis-server"
+            exit 1
+        fi
+        sleep 2
+    else
+        echo "❌ Homebrew not found. Install Redis and start it manually."
+        exit 1
+    fi
+fi
+
+if ! redis-cli ping > /dev/null 2>&1; then
+    echo "❌ Redis is still not reachable."
+    exit 1
 fi
 
 echo "✅ Redis is running"
@@ -57,10 +76,9 @@ check_pg() {
 
 if ! check_pg; then
   echo "⚠️  PostgreSQL not reachable. Attempting to start via Docker Compose..."
-  if command -v docker >/dev/null 2>&1; then
-    if command -v docker compose >/dev/null 2>&1; then
-      echo "▶️  docker compose up -d postgres"
-      docker compose up -d postgres || true
+  if command -v docker >/dev/null 2>&1 && command -v docker compose >/dev/null 2>&1; then
+    echo "▶️  docker compose up -d postgres"
+    if docker compose up -d postgres; then
       echo "⏳ Waiting for PostgreSQL to accept connections..."
       for i in {1..30}; do
         if check_pg; then
@@ -69,6 +87,8 @@ if ! check_pg; then
         fi
         sleep 1
       done
+    else
+      echo "⚠️  Docker compose failed. Skipping Docker wait."
     fi
   fi
 fi

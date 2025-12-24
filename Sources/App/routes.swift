@@ -1,6 +1,14 @@
 import Vapor
 import Fluent
 
+// MARK: - Response Models
+
+struct StandingsUpdateStatus: Content {
+    let leagueId: Int
+    let isActive: Bool
+    let lastUpdate: Date?
+}
+
 /// Register HTTP routes for debugging and testing
 public func routes(_ app: Application) throws {
     // Health check endpoint
@@ -157,7 +165,10 @@ public func routes(_ app: Application) throws {
         }
 
         let apiClient: APIFootballClient = req.getService()
-        return try await apiClient.getLiveFixtures(leagueId: leagueId)
+        let cache: CacheService = req.getService()
+        return try await cache.getOrFetchLiveFixtures(leagueID: leagueId) {
+            try await apiClient.getLiveFixtures(leagueId: leagueId)
+        }
     }
 
     // Get fixture by ID
@@ -319,6 +330,75 @@ public func routes(_ app: Application) throws {
         return try await cache.getOrFetchStandings(leagueID: leagueId, season: season) {
             try await apiClient.getStandings(leagueId: leagueId, season: season)
         }
+    }
+
+    // Start automatic standings updates for a league
+    api.post("league", ":id", "season", ":season", "standings", "start") { req async throws -> [String: String] in
+        guard let leagueId = req.parameters.get("id", as: Int.self),
+              let season = req.parameters.get("season", as: Int.self) else {
+            throw Abort(.badRequest, reason: "Invalid league ID or season")
+        }
+
+        let standingsService: StandingsUpdateService = req.getService()
+        standingsService.startUpdates(leagueID: leagueId, season: season)
+
+        return [
+            "status": "started",
+            "leagueId": "\(leagueId)",
+            "season": "\(season)",
+            "message": "Standings updates started. Will poll every hour during games, then at 10, 20, 30 min and 1h 5min after last game."
+        ]
+    }
+
+    // Stop automatic standings updates for a league
+    api.post("league", ":id", "standings", "stop") { req async throws -> [String: String] in
+        guard let leagueId = req.parameters.get("id", as: Int.self) else {
+            throw Abort(.badRequest, reason: "Invalid league ID")
+        }
+
+        let standingsService: StandingsUpdateService = req.getService()
+        standingsService.stopUpdates(leagueID: leagueId)
+
+        return [
+            "status": "stopped",
+            "leagueId": "\(leagueId)",
+            "message": "Standings updates stopped"
+        ]
+    }
+
+    // Get standings update status
+    api.get("league", ":id", "standings", "status") { req async throws -> StandingsUpdateStatus in
+        guard let leagueId = req.parameters.get("id", as: Int.self) else {
+            throw Abort(.badRequest, reason: "Invalid league ID")
+        }
+
+        let standingsService: StandingsUpdateService = req.getService()
+        let isActive = standingsService.isActive(leagueID: leagueId)
+        let lastUpdate = standingsService.getLastUpdateTime(leagueID: leagueId)
+
+        return StandingsUpdateStatus(
+            leagueId: leagueId,
+            isActive: isActive,
+            lastUpdate: lastUpdate
+        )
+    }
+
+    // Manually trigger standings update
+    api.post("league", ":id", "season", ":season", "standings", "update") { req async throws -> [String: String] in
+        guard let leagueId = req.parameters.get("id", as: Int.self),
+              let season = req.parameters.get("season", as: Int.self) else {
+            throw Abort(.badRequest, reason: "Invalid league ID or season")
+        }
+
+        let standingsService: StandingsUpdateService = req.getService()
+        try await standingsService.updateStandingsNow(leagueID: leagueId, season: season)
+
+        return [
+            "status": "updated",
+            "leagueId": "\(leagueId)",
+            "season": "\(season)",
+            "message": "Standings updated successfully"
+        ]
     }
 
     // Get team details

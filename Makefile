@@ -1,5 +1,11 @@
 .PHONY: help build run test clean proto redis setup install
 
+MODULE_CACHE_DIR := $(CURDIR)/.build/module-cache
+MODULE_CACHE_ENV := SWIFTPM_DISABLE_SANDBOX=1 CLANG_MODULE_CACHE_PATH=$(MODULE_CACHE_DIR) SWIFT_MODULE_CACHE_PATH=$(MODULE_CACHE_DIR)
+SWIFT_BUILD_FLAGS := --disable-sandbox
+SWIFT_RUN_FLAGS := --disable-sandbox
+SWIFT_TEST_FLAGS := --disable-sandbox
+
 # Default target
 help:
 	@echo "AFCON Middleware - Makefile Commands"
@@ -39,27 +45,32 @@ proto:
 # Build the project
 build:
 	@echo "🔨 Building project..."
-	@swift build
+	@mkdir -p $(MODULE_CACHE_DIR)
+	@$(MODULE_CACHE_ENV) swift build $(SWIFT_BUILD_FLAGS)
 
 # Build in release mode
 build-release:
 	@echo "🔨 Building project (release)..."
-	@swift build -c release
+	@mkdir -p $(MODULE_CACHE_DIR)
+	@$(MODULE_CACHE_ENV) swift build -c release $(SWIFT_BUILD_FLAGS)
 
 # Run the server
 run:
 	@echo "🚀 Starting AFCON Middleware..."
-	@swift run
+	@mkdir -p $(MODULE_CACHE_DIR)
+	@$(MODULE_CACHE_ENV) swift run $(SWIFT_RUN_FLAGS)
 
 # Run in release mode
 run-release:
 	@echo "🚀 Starting AFCON Middleware (release)..."
-	@swift run -c release
+	@mkdir -p $(MODULE_CACHE_DIR)
+	@$(MODULE_CACHE_ENV) swift run -c release $(SWIFT_RUN_FLAGS)
 
 # Run tests
 test:
 	@echo "🧪 Running tests..."
-	@swift test
+	@mkdir -p $(MODULE_CACHE_DIR)
+	@$(MODULE_CACHE_ENV) swift test $(SWIFT_TEST_FLAGS)
 
 # Start Redis
 redis:
@@ -89,12 +100,12 @@ clean-all: clean
 # Build example client
 client:
 	@echo "🔨 Building example client..."
-	@cd Examples/AFCONClient && swift build
+	@cd Examples/AFCONClient && mkdir -p $(MODULE_CACHE_DIR) && $(MODULE_CACHE_ENV) swift build $(SWIFT_BUILD_FLAGS)
 
 # Run example client
 run-client:
 	@echo "🚀 Running example client..."
-	@cd Examples/AFCONClient && swift run
+	@cd Examples/AFCONClient && mkdir -p $(MODULE_CACHE_DIR) && $(MODULE_CACHE_ENV) swift run $(SWIFT_RUN_FLAGS)
 
 # Check code formatting
 format:
@@ -147,11 +158,12 @@ flush-cache:
 	@echo "🗑️  Flushing Redis cache..."
 	@redis-cli FLUSHDB
 	@echo "✅ Cache flushed"
-SUFFIXES
+.SUFFIXES:
 # Development mode with auto-reload
 dev:
 	@echo "🔄 Running in development mode..."
-	@swift run
+	@mkdir -p $(MODULE_CACHE_DIR)
+	@$(MODULE_CACHE_ENV) swift run $(SWIFT_RUN_FLAGS)
 
 # Show Redis keys
 redis-keys:

@@ -65,7 +65,7 @@ public final class NotificationHistoryEntity: Model, Content, @unchecked Sendabl
 // MARK: - Migration
 
 struct CreateNotificationHistoryEntity: AsyncMigration {
-    func prepare(on database: Database) async throws {
+    func prepare(on database: any Database) async throws {
         try await database.schema(NotificationHistoryEntity.schema)
             .id()
             .field("device_id", .uuid, .references(DeviceRegistrationEntity.schema, "id", onDelete: .setNull))
@@ -81,7 +81,7 @@ struct CreateNotificationHistoryEntity: AsyncMigration {
 
     }
 
-    func revert(on database: Database) async throws {
+    func revert(on database: any Database) async throws {
         try await database.schema(NotificationHistoryEntity.schema).delete()
     }
 }

@@ -3,11 +3,11 @@ import Vapor
 import Fluent
 
 /// Repository for managing fixtures in the database
-public final class FixtureRepository {
-    private let db: Database
+public final class FixtureRepository: @unchecked Sendable {
+    private let db: any Database
     private let logger: Logger
 
-    public init(db: Database, logger: Logger) {
+    public init(db: any Database, logger: Logger) {
         self.db = db
         self.logger = logger
     }
@@ -221,7 +221,19 @@ public final class FixtureRepository {
     /// Check if there are any live matches for a given league
     /// Returns true if at least one match is in progress
     func hasLiveMatches(leagueId: Int, season: Int) async throws -> Bool {
-        let count = try await FixtureEntity.query(on: db)
+        // First, get ALL fixtures for this league/season to see their statuses
+        let allFixtures = try await FixtureEntity.query(on: db)
+            .filter(\.$leagueId == leagueId)
+            .filter(\.$season == season)
+            .all()
+
+        let statusCounts = Dictionary(grouping: allFixtures) { $0.statusShort }
+            .mapValues { $0.count }
+
+        logger.info("📊 All fixture statuses for league \(leagueId): \(statusCounts)")
+
+        // Now check for live matches
+        let liveFixtures = try await FixtureEntity.query(on: db)
             .filter(\.$leagueId == leagueId)
             .filter(\.$season == season)
             .group(.or) { group in
@@ -233,10 +245,20 @@ public final class FixtureRepository {
                 group.filter(\.$statusShort == "BT")  // Break Time
                 group.filter(\.$statusShort == "P")   // Penalties
                 group.filter(\.$statusShort == "LIVE") // Live (generic)
+                group.filter(\.$statusShort == "SUSP") // Suspended
+                group.filter(\.$statusShort == "INT")  // Interrupted
             }
-            .count()
+            .all()
 
-        logger.info("📊 Live match check for league \(leagueId): \(count) matches in progress")
-        return count > 0
+        if !liveFixtures.isEmpty {
+            logger.info("🔴 Live matches found: \(liveFixtures.count)")
+            for fixture in liveFixtures {
+                logger.info("  - Fixture \(fixture.apiFixtureId): \(fixture.homeTeamName) vs \(fixture.awayTeamName) (\(fixture.statusShort) - \(fixture.statusLong))")
+            }
+        } else {
+            logger.info("📊 Live match check for league \(leagueId): 0 matches in progress")
+        }
+
+        return !liveFixtures.isEmpty
     }
 }

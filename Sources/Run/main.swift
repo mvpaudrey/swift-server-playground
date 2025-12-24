@@ -60,20 +60,25 @@ struct Main {
         // Get services from Vapor app
         let apiClient: APIFootballClient = app.getService()
         let cache: CacheService = app.getService()
-        // let notificationService: NotificationService = app.getService() // Disabled for Swift 6 migration
+        let notificationService: NotificationService = app.getService()
         let deviceRepository: DeviceRepository = app.getService()
+        let broadcaster: LiveMatchBroadcaster = app.getService()
+
+        // Start notification service cleanup task
+        await notificationService.startCleanupTask()
 
         // Create FixtureRepository with database connection
         let db: any Database = app.db
         let fixtureRepository = FixtureRepository(db: db, logger: app.logger)
 
-        // Create gRPC service provider
+        // Create gRPC service provider with broadcaster for scalable live streaming
         let serviceProvider = AFCONServiceProvider(
             apiClient: apiClient,
             cache: cache,
             fixtureRepository: fixtureRepository,
-            notificationService: nil, // TODO: Re-enable after APNSwift migration
+            notificationService: notificationService,
             deviceRepository: deviceRepository,
+            broadcaster: broadcaster,
             logger: app.logger
         )
 
