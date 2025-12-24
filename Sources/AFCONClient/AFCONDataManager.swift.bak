@@ -1,0 +1,560 @@
+import Foundation
+import SwiftData
+
+/// Data manager implementing the caching strategy:
+/// 1. Check SwiftData cache
+/// 2. If empty, load from JSON fallback
+/// 3. Fetch from server and update SwiftData
+@available(macOS 15.0, iOS 18.0, *)
+@MainActor
+public final class AFCONDataManager: ObservableObject {
+    // MARK: - Properties
+
+    public let modelContainer: ModelContainer
+    public let modelContext: ModelContext
+    public let service: AFCONService
+
+    private let leagueId: Int32
+    private let season: Int32
+
+    @Published public var isLoading = false
+    @Published public var lastError: Error?
+
+    // MARK: - Cache Configuration
+
+    /// How long before cached data is considered stale (default: 1 hour)
+    public var cacheExpirationInterval: TimeInterval = 3600
+
+    // MARK: - Initialization
+
+    public init(
+        leagueId: Int32 = 6,
+        season: Int32 = 2025,
+        modelContainer: ModelContainer? = nil
+    ) throws {
+        self.leagueId = leagueId
+        self.season = season
+
+        // Create or use provided model container
+        if let container = modelContainer {
+            self.modelContainer = container
+        } else {
+            let schema = Schema([
+                LeagueModel.self,
+                TeamModel.self,
+                FixtureModel.self,
+                StandingsModel.self
+            ])
+
+            // Get the app support directory and ensure it exists
+            let appSupportURL = FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first!
+
+            // Create app support directory if it doesn't exist
+            let afconDirectoryURL = appSupportURL.appendingPathComponent("AFCON", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: afconDirectoryURL,
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+
+            // Create model configuration with explicit URL
+            let storeURL = afconDirectoryURL.appendingPathComponent("afcon.store")
+            let configuration = ModelConfiguration(
+                schema: schema,
+                url: storeURL,
+                cloudKitDatabase: .none
+            )
+
+            do {
+                self.modelContainer = try ModelContainer(
+                    for: schema,
+                    configurations: [configuration]
+                )
+                print("✅ SwiftData storage initialized at: \(storeURL.path)")
+            } catch {
+                // Fallback to in-memory storage if file-based storage fails
+                print("⚠️ Failed to create file-based storage, using in-memory: \(error)")
+                let inMemoryConfig = ModelConfiguration(
+                    schema: schema,
+                    isStoredInMemoryOnly: true
+                )
+                self.modelContainer = try ModelContainer(
+                    for: schema,
+                    configurations: [inMemoryConfig]
+                )
+                print("✅ SwiftData using in-memory storage")
+            }
+        }
+
+        self.modelContext = ModelContext(modelContainer)
+        self.service = try AFCONService()
+    }
+
+    // MARK: - Convenience Initializers
+
+    /// Simplified initializer for SwiftUI apps
+    /// Creates a shared model container that can be injected into the environment
+    public static func makeSharedContainer(
+        leagueId: Int32 = 6,
+        season: Int32 = 2025
+    ) throws -> ModelContainer {
+        let schema = Schema([
+            LeagueModel.self,
+            TeamModel.self,
+            FixtureModel.self,
+            StandingsModel.self
+        ])
+
+        // Get the app support directory and ensure it exists
+        let appSupportURL = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first!
+
+        // Create app support directory if it doesn't exist
+        let afconDirectoryURL = appSupportURL.appendingPathComponent("AFCON", isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: afconDirectoryURL,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+
+        // Create model configuration with explicit URL
+        let storeURL = afconDirectoryURL.appendingPathComponent("afcon.store")
+        let configuration = ModelConfiguration(
+            schema: schema,
+            url: storeURL,
+            cloudKitDatabase: .none
+        )
+
+        do {
+            let container = try ModelContainer(
+                for: schema,
+                configurations: [configuration]
+            )
+            print("✅ SwiftData storage initialized at: \(storeURL.path)")
+            return container
+        } catch {
+            // Fallback to in-memory storage
+            print("⚠️ Failed to create file-based storage, using in-memory: \(error)")
+            let inMemoryConfig = ModelConfiguration(
+                schema: schema,
+                isStoredInMemoryOnly: true
+            )
+            let container = try ModelContainer(
+                for: schema,
+                configurations: [inMemoryConfig]
+            )
+            print("✅ SwiftData using in-memory storage")
+            return container
+        }
+    }
+
+    // MARK: - Data Fetching with Caching Strategy
+
+    /// Get league info with caching strategy
+    public func getLeague() async throws -> LeagueModel {
+        // Step 1: Check SwiftData cache
+        if let cached = try await fetchCachedLeague() {
+            print("📦 League loaded from SwiftData cache")
+
+            // Fetch from server in background to update cache
+            Task {
+                try? await refreshLeagueFromServer()
+            }
+
+            return cached
+        }
+
+        // Step 2: Load from JSON fallback if available
+        if let jsonData = try? await loadLeagueFromJSON() {
+            print("📄 League loaded from JSON fallback")
+            try modelContext.insert(jsonData)
+            try modelContext.save()
+
+            // Fetch from server to update
+            Task {
+                try? await refreshLeagueFromServer()
+            }
+
+            return jsonData
+        }
+
+        // Step 3: Fetch from server (first time)
+        print("🌐 Fetching league from server")
+        return try await refreshLeagueFromServer()
+    }
+
+    /// Get teams with caching strategy
+    public func getTeams() async throws -> [TeamModel] {
+        // Step 1: Check SwiftData cache
+        if let cached = try await fetchCachedTeams(), !cached.isEmpty {
+            print("📦 Teams loaded from SwiftData cache (\(cached.count) teams)")
+
+            // Refresh in background
+            Task {
+                try? await refreshTeamsFromServer()
+            }
+
+            return cached
+        }
+
+        // Step 2: Load from JSON fallback
+        if let jsonData = try? await loadTeamsFromJSON(), !jsonData.isEmpty {
+            print("📄 Teams loaded from JSON fallback (\(jsonData.count) teams)")
+            for team in jsonData {
+                modelContext.insert(team)
+            }
+            try modelContext.save()
+
+            // Refresh from server
+            Task {
+                try? await refreshTeamsFromServer()
+            }
+
+            return jsonData
+        }
+
+        // Step 3: Fetch from server
+        print("🌐 Fetching teams from server")
+        return try await refreshTeamsFromServer()
+    }
+
+    /// Get fixtures with caching strategy
+    public func getFixtures(live: Bool = false, teamId: Int32? = nil) async throws -> [FixtureModel] {
+        // For live fixtures, always fetch from server
+        if live {
+            print("🔴 Fetching live fixtures from server")
+            return try await refreshFixturesFromServer(live: true, teamId: teamId)
+        }
+
+        // Step 1: Check SwiftData cache
+        if let cached = try await fetchCachedFixtures(teamId: teamId), !cached.isEmpty {
+            print("📦 Fixtures loaded from SwiftData cache (\(cached.count) fixtures)")
+
+            // Refresh in background
+            Task {
+                try? await refreshFixturesFromServer(live: false, teamId: teamId)
+            }
+
+            return cached
+        }
+
+        // Step 2: Load from JSON fallback
+        if let jsonData = try? await loadFixturesFromJSON(), !jsonData.isEmpty {
+            print("📄 Fixtures loaded from JSON fallback (\(jsonData.count) fixtures)")
+            for fixture in jsonData {
+                modelContext.insert(fixture)
+            }
+            try modelContext.save()
+
+            // Refresh from server
+            Task {
+                try? await refreshFixturesFromServer(live: false, teamId: teamId)
+            }
+
+            return jsonData
+        }
+
+        // Step 3: Fetch from server
+        print("🌐 Fetching fixtures from server")
+        return try await refreshFixturesFromServer(live: false, teamId: teamId)
+    }
+
+    /// Get standings with caching strategy
+    public func getStandings() async throws -> [StandingsModel] {
+        // Step 1: Check SwiftData cache
+        if let cached = try await fetchCachedStandings(), !cached.isEmpty {
+            print("📦 Standings loaded from SwiftData cache (\(cached.count) entries)")
+
+            // Refresh in background
+            Task {
+                try? await refreshStandingsFromServer()
+            }
+
+            return cached
+        }
+
+        // Step 2: Load from JSON fallback
+        if let jsonData = try? await loadStandingsFromJSON(), !jsonData.isEmpty {
+            print("📄 Standings loaded from JSON fallback (\(jsonData.count) entries)")
+            for standing in jsonData {
+                modelContext.insert(standing)
+            }
+            try modelContext.save()
+
+            // Refresh from server
+            Task {
+                try? await refreshStandingsFromServer()
+            }
+
+            return jsonData
+        }
+
+        // Step 3: Fetch from server
+        print("🌐 Fetching standings from server")
+        return try await refreshStandingsFromServer()
+    }
+
+    // MARK: - Server Refresh Methods
+
+    @discardableResult
+    private func refreshLeagueFromServer() async throws -> LeagueModel {
+        isLoading = true
+        defer { isLoading = false }
+
+        let response = try await service.getLeague(leagueId: leagueId, season: season)
+        let model = LeagueModel.from(proto: response, season: Int(season))
+
+        // Delete old league data
+        try modelContext.delete(model: LeagueModel.self, where: #Predicate { $0.id == model.id })
+
+        modelContext.insert(model)
+        try modelContext.save()
+
+        print("✅ League refreshed from server")
+        return model
+    }
+
+    @discardableResult
+    private func refreshTeamsFromServer() async throws -> [TeamModel] {
+        isLoading = true
+        defer { isLoading = false }
+
+        let teams = try await service.getTeams(leagueId: leagueId, season: season)
+        let models = teams.map { TeamModel.from(proto: $0, season: Int(season)) }
+
+        // Delete old teams
+        try modelContext.delete(model: TeamModel.self, where: #Predicate { $0.season == Int(season) })
+
+        for model in models {
+            modelContext.insert(model)
+        }
+        try modelContext.save()
+
+        print("✅ Teams refreshed from server (\(models.count) teams)")
+        return models
+    }
+
+    @discardableResult
+    private func refreshFixturesFromServer(live: Bool, teamId: Int32?) async throws -> [FixtureModel] {
+        isLoading = true
+        defer { isLoading = false }
+
+        let fixtures = try await service.getFixtures(
+            leagueId: leagueId,
+            season: season,
+            teamId: teamId,
+            live: live
+        )
+        let models = fixtures.map { FixtureModel.from(proto: $0) }
+
+        if !live {
+            // Only cache non-live fixtures
+            // Delete old fixtures for this season
+            try modelContext.delete(model: FixtureModel.self, where: #Predicate { $0.leagueSeason == Int(season) })
+
+            for model in models {
+                modelContext.insert(model)
+            }
+            try modelContext.save()
+        }
+
+        print("✅ Fixtures refreshed from server (\(models.count) fixtures)")
+        return models
+    }
+
+    @discardableResult
+    private func refreshStandingsFromServer() async throws -> [StandingsModel] {
+        isLoading = true
+        defer { isLoading = false }
+
+        let response = try await service.getStandings(leagueId: leagueId, season: season)
+        var models: [StandingsModel] = []
+
+        for group in response.standings {
+            for team in group.teams {
+                let model = StandingsModel.from(
+                    proto: team,
+                    leagueId: Int(leagueId),
+                    season: Int(season),
+                    groupName: group.group
+                )
+                models.append(model)
+            }
+        }
+
+        // Delete old standings
+        try modelContext.delete(model: StandingsModel.self, where: #Predicate {
+            $0.leagueId == Int(leagueId) && $0.season == Int(season)
+        })
+
+        for model in models {
+            modelContext.insert(model)
+        }
+        try modelContext.save()
+
+        print("✅ Standings refreshed from server (\(models.count) entries)")
+        return models
+    }
+
+    // MARK: - Cache Fetch Methods
+
+    private func fetchCachedLeague() async throws -> LeagueModel? {
+        let descriptor = FetchDescriptor<LeagueModel>(
+            predicate: #Predicate { league in
+                league.id == Int(leagueId) && league.season == Int(season)
+            }
+        )
+
+        let results = try modelContext.fetch(descriptor)
+        guard let league = results.first else { return nil }
+
+        // Check if cache is stale
+        if Date().timeIntervalSince(league.lastUpdated) > cacheExpirationInterval {
+            print("⚠️ League cache is stale")
+            return nil
+        }
+
+        return league
+    }
+
+    private func fetchCachedTeams() async throws -> [TeamModel]? {
+        let descriptor = FetchDescriptor<TeamModel>(
+            predicate: #Predicate { $0.season == Int(season) },
+            sortBy: [SortDescriptor(\TeamModel.name)]
+        )
+
+        let results = try modelContext.fetch(descriptor)
+        if results.isEmpty { return nil }
+
+        // Check if cache is stale
+        if let firstTeam = results.first,
+           Date().timeIntervalSince(firstTeam.lastUpdated) > cacheExpirationInterval {
+            print("⚠️ Teams cache is stale")
+            return nil
+        }
+
+        return results
+    }
+
+    private func fetchCachedFixtures(teamId: Int32?) async throws -> [FixtureModel]? {
+        let predicate: Predicate<FixtureModel>
+
+        if let teamId = teamId {
+            predicate = #Predicate { fixture in
+                fixture.leagueSeason == Int(season) &&
+                (fixture.homeTeamId == Int(teamId) || fixture.awayTeamId == Int(teamId))
+            }
+        } else {
+            predicate = #Predicate { fixture in
+                fixture.leagueSeason == Int(season)
+            }
+        }
+
+        let descriptor = FetchDescriptor<FixtureModel>(
+            predicate: predicate,
+            sortBy: [SortDescriptor(\FixtureModel.date)]
+        )
+
+        let results = try modelContext.fetch(descriptor)
+        if results.isEmpty { return nil }
+
+        // Check if cache is stale
+        if let firstFixture = results.first,
+           Date().timeIntervalSince(firstFixture.lastUpdated) > cacheExpirationInterval {
+            print("⚠️ Fixtures cache is stale")
+            return nil
+        }
+
+        return results
+    }
+
+    private func fetchCachedStandings() async throws -> [StandingsModel]? {
+        let descriptor = FetchDescriptor<StandingsModel>(
+            predicate: #Predicate {
+                $0.leagueId == Int(leagueId) && $0.season == Int(season)
+            },
+            sortBy: [
+                SortDescriptor(\StandingsModel.groupName),
+                SortDescriptor(\StandingsModel.rank)
+            ]
+        )
+
+        let results = try modelContext.fetch(descriptor)
+        if results.isEmpty { return nil }
+
+        // Check if cache is stale
+        if let firstStanding = results.first,
+           Date().timeIntervalSince(firstStanding.lastUpdated) > cacheExpirationInterval {
+            print("⚠️ Standings cache is stale")
+            return nil
+        }
+
+        return results
+    }
+
+    // MARK: - JSON Fallback Methods
+
+    private func loadLeagueFromJSON() async throws -> LeagueModel? {
+        guard let url = Bundle.main.url(forResource: "league_fallback", withExtension: "json") else {
+            return nil
+        }
+
+        let data = try Data(contentsOf: url)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        return try decoder.decode(LeagueModel.self, from: data)
+    }
+
+    private func loadTeamsFromJSON() async throws -> [TeamModel]? {
+        guard let url = Bundle.main.url(forResource: "teams_fallback", withExtension: "json") else {
+            return nil
+        }
+
+        let data = try Data(contentsOf: url)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        return try decoder.decode([TeamModel.self], from: data)
+    }
+
+    private func loadFixturesFromJSON() async throws -> [FixtureModel]? {
+        guard let url = Bundle.main.url(forResource: "fixtures_fallback", withExtension: "json") else {
+            return nil
+        }
+
+        let data = try Data(contentsOf: url)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        return try decoder.decode([FixtureModel.self], from: data)
+    }
+
+    private func loadStandingsFromJSON() async throws -> [StandingsModel]? {
+        guard let url = Bundle.main.url(forResource: "standings_fallback", withExtension: "json") else {
+            return nil
+        }
+
+        let data = try Data(contentsOf: url)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        return try decoder.decode([StandingsModel.self], from: data)
+    }
+
+    // MARK: - Clear Cache
+
+    public func clearAllCache() throws {
+        try modelContext.delete(model: LeagueModel.self)
+        try modelContext.delete(model: TeamModel.self)
+        try modelContext.delete(model: FixtureModel.self)
+        try modelContext.delete(model: StandingsModel.self)
+        try modelContext.save()
+        print("🗑️ All cache cleared")
+    }
+}

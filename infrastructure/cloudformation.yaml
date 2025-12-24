@@ -1,0 +1,840 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AFCON Swift gRPC Server - Complete AWS Infrastructure for Production Deployment'
+
+# ============================================================================
+# Parameters
+# ============================================================================
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+    AllowedValues:
+      - development
+      - staging
+      - production
+    Description: Environment name for resource tagging and configuration
+
+  VpcCIDR:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block for VPC
+
+  PublicSubnet1CIDR:
+    Type: String
+    Default: 10.0.1.0/24
+    Description: CIDR block for public subnet in AZ1
+
+  PublicSubnet2CIDR:
+    Type: String
+    Default: 10.0.2.0/24
+    Description: CIDR block for public subnet in AZ2
+
+  PrivateSubnet1CIDR:
+    Type: String
+    Default: 10.0.10.0/24
+    Description: CIDR block for private subnet in AZ1
+
+  PrivateSubnet2CIDR:
+    Type: String
+    Default: 10.0.11.0/24
+    Description: CIDR block for private subnet in AZ2
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    AllowedValues:
+      - db.t4g.micro
+      - db.t4g.small
+      - db.t4g.medium
+      - db.t4g.large
+    Description: RDS PostgreSQL instance class
+
+  CacheNodeType:
+    Type: String
+    Default: cache.t4g.micro
+    AllowedValues:
+      - cache.t4g.micro
+      - cache.t4g.small
+      - cache.t4g.medium
+    Description: ElastiCache Redis node type
+
+  ContainerCpu:
+    Type: Number
+    Default: 512
+    AllowedValues: [256, 512, 1024, 2048, 4096]
+    Description: ECS task CPU units (256 = 0.25 vCPU)
+
+  ContainerMemory:
+    Type: Number
+    Default: 1024
+    AllowedValues: [512, 1024, 2048, 4096, 8192]
+    Description: ECS task memory in MB
+
+  DesiredCount:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+    Description: Desired number of ECS tasks
+
+  MaxCount:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 50
+    Description: Maximum number of ECS tasks for auto-scaling
+
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: (Optional) ACM Certificate ARN for HTTPS/gRPC over TLS
+
+# ============================================================================
+# Conditions
+# ============================================================================
+Conditions:
+  IsProduction: !Equals [!Ref EnvironmentName, production]
+  HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
+
+# ============================================================================
+# Resources
+# ============================================================================
+Resources:
+  # ========================================
+  # VPC and Networking
+  # ========================================
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-afcon-vpc
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-afcon-igw
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  # Public Subnets
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Subnet (AZ1)
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Subnet (AZ2)
+
+  # Private Subnets
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Subnet (AZ1)
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Subnet (AZ2)
+
+  # NAT Gateway for outbound connectivity from private subnets
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-nat-eip-az1
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-nat-az1
+
+  # Route Tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Routes
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Routes (AZ1)
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet2
+
+  # ========================================
+  # Security Groups
+  # ========================================
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Application Load Balancer
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTP from anywhere
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTPS/gRPC from anywhere
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-alb-sg
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ECS tasks
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Allow HTTP from ALB
+        - IpProtocol: tcp
+          FromPort: 50051
+          ToPort: 50051
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Allow gRPC from ALB
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-ecs-sg
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS PostgreSQL
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ECSSecurityGroup
+          Description: Allow PostgreSQL from ECS tasks
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-rds-sg
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ElastiCache Redis
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref ECSSecurityGroup
+          Description: Allow Redis from ECS tasks
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-redis-sg
+
+  # ========================================
+  # RDS PostgreSQL Database
+  # ========================================
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS PostgreSQL
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-subnet-group
+
+  DBPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${EnvironmentName}-afcon-db-password
+      Description: PostgreSQL database password
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "postgres"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+        RequireEachIncludedType: true
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      Engine: postgres
+      EngineVersion: '15.4'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: 20
+      StorageType: gp3
+      DBName: afcon
+      MasterUsername: postgres
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:password}}'
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+      MultiAZ: !If [IsProduction, true, false]
+      BackupRetentionPeriod: !If [IsProduction, 7, 1]
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      PubliclyAccessible: false
+      StorageEncrypted: true
+      EnableCloudwatchLogsExports:
+        - postgresql
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-afcon-db
+
+  # ========================================
+  # ElastiCache Redis
+  # ========================================
+  RedisSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Subnet group for ElastiCache Redis
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  RedisReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupId: !Sub ${EnvironmentName}-afcon-redis
+      ReplicationGroupDescription: Redis cache for AFCON server
+      Engine: redis
+      CacheNodeType: !Ref CacheNodeType
+      NumCacheClusters: 2
+      AutomaticFailoverEnabled: true
+      CacheSubnetGroupName: !Ref RedisSubnetGroup
+      SecurityGroupIds:
+        - !Ref RedisSecurityGroup
+      AtRestEncryptionEnabled: true
+      TransitEncryptionEnabled: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-afcon-redis
+
+  # ========================================
+  # Application Load Balancer
+  # ========================================
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${EnvironmentName}-afcon-alb
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-afcon-alb
+
+  # HTTP Target Group (REST API)
+  HTTPTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-http-tg
+      Port: 8080
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: 200
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-http-tg
+
+  # gRPC Target Group
+  GRPCTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-grpc-tg
+      Port: 50051
+      Protocol: HTTP
+      ProtocolVersion: GRPC
+      VpcId: !Ref VPC
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckPort: '8080'
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-grpc-tg
+
+  # HTTP Listener (port 80)
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: !If
+            - HasCertificate
+            - redirect
+            - forward
+          RedirectConfig: !If
+            - HasCertificate
+            - Protocol: HTTPS
+              Port: '443'
+              StatusCode: HTTP_301
+            - !Ref AWS::NoValue
+          TargetGroupArn: !If
+            - HasCertificate
+            - !Ref AWS::NoValue
+            - !Ref HTTPTargetGroup
+
+  # HTTPS Listener (port 443) - for gRPC and HTTPS
+  HTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCertificate
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref GRPCTargetGroup
+
+  # ========================================
+  # ECR Repository
+  # ========================================
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: afcon-server
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Keep last 10 images",
+              "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": 10
+              },
+              "action": { "type": "expire" }
+            }]
+          }
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-afcon-ecr
+
+  # ========================================
+  # ECS Cluster
+  # ========================================
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${EnvironmentName}-afcon-cluster
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+          Base: !Ref DesiredCount
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 4
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-afcon-cluster
+
+  # ECS Task Execution Role
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref DBPasswordSecret
+                  - !Ref APIFootballKeySecret
+                  - !Ref APNSSecret
+                  - !Ref FCMSecret
+
+  # ECS Task Role
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt CloudWatchLogsGroup.Arn
+
+  # CloudWatch Logs
+  CloudWatchLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${EnvironmentName}-afcon-server
+      RetentionInDays: !If [IsProduction, 30, 7]
+
+  # ECS Task Definition
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: afcon-server
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: !Ref ContainerCpu
+      Memory: !Ref ContainerMemory
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      TaskRoleArn: !Ref ECSTaskRole
+      ContainerDefinitions:
+        - Name: afcon-server
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/afcon-server:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+            - ContainerPort: 50051
+              Protocol: tcp
+          Environment:
+            - Name: PORT
+              Value: '8080'
+            - Name: GRPC_PORT
+              Value: '50051'
+            - Name: ENVIRONMENT
+              Value: !Ref EnvironmentName
+            - Name: LOG_LEVEL
+              Value: info
+            - Name: DATABASE_URL
+              Value: !Sub
+                - 'postgres://postgres:{{resolve:secretsmanager:${SecretArn}:SecretString:password}}@${DBEndpoint}:5432/afcon'
+                - SecretArn: !Ref DBPasswordSecret
+                  DBEndpoint: !GetAtt Database.Endpoint.Address
+            - Name: REDIS_URL
+              Value: !Sub 'redis://${RedisReplicationGroup.PrimaryEndPoint.Address}:6379'
+            - Name: INIT_LEAGUES
+              Value: '6:2025:AFCON 2025'
+          Secrets:
+            - Name: API_FOOTBALL_KEY
+              ValueFrom: !Sub '${APIFootballKeySecret}:api_key::'
+            - Name: APNS_KEY_ID
+              ValueFrom: !Sub '${APNSSecret}:key_id::'
+            - Name: APNS_TEAM_ID
+              ValueFrom: !Sub '${APNSSecret}:team_id::'
+            - Name: APNS_TOPIC
+              ValueFrom: !Sub '${APNSSecret}:topic::'
+            - Name: FCM_SERVER_KEY
+              ValueFrom: !Sub '${FCMSecret}:server_key::'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CloudWatchLogsGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  # ECS Service
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - HTTPListener
+    Properties:
+      ServiceName: afcon-service
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+      LoadBalancers:
+        - ContainerName: afcon-server
+          ContainerPort: 8080
+          TargetGroupArn: !Ref HTTPTargetGroup
+        - ContainerName: afcon-server
+          ContainerPort: 50051
+          TargetGroupArn: !Ref GRPCTargetGroup
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-afcon-service
+
+  # Auto Scaling
+  ServiceScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: !Ref MaxCount
+      MinCapacity: !Ref DesiredCount
+      ResourceId: !Sub service/${ECSCluster}/${ECSService.Name}
+      RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  ServiceScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: cpu-target-tracking
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ServiceScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70.0
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+
+  # ========================================
+  # Secrets Manager
+  # ========================================
+  APIFootballKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${EnvironmentName}-afcon-api-football-key
+      Description: API-Football API Key
+      SecretString: !Sub '{"api_key": "REPLACE_WITH_YOUR_API_KEY"}'
+
+  APNSSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${EnvironmentName}-afcon-apns
+      Description: Apple Push Notification Service credentials
+      SecretString: !Sub '{"key_id": "REPLACE", "team_id": "REPLACE", "topic": "com.yourapp.bundleid"}'
+
+  FCMSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${EnvironmentName}-afcon-fcm
+      Description: Firebase Cloud Messaging server key
+      SecretString: !Sub '{"server_key": "REPLACE_WITH_FCM_SERVER_KEY"}'
+
+  # ========================================
+  # CloudWatch Alarms
+  # ========================================
+  HighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-afcon-high-cpu
+      AlarmDescription: Alert when CPU exceeds 80%
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ServiceName
+          Value: !GetAtt ECSService.Name
+        - Name: ClusterName
+          Value: !Ref ECSCluster
+
+  DatabaseConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-afcon-db-connections
+      AlarmDescription: Alert when database connections exceed 80%
+      MetricName: DatabaseConnections
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+
+# ============================================================================
+# Outputs
+# ============================================================================
+Outputs:
+  LoadBalancerDNS:
+    Description: DNS name of the Application Load Balancer
+    Value: !GetAtt LoadBalancer.DNSName
+    Export:
+      Name: !Sub ${EnvironmentName}-afcon-alb-dns
+
+  HTTPEndpoint:
+    Description: HTTP REST API endpoint
+    Value: !Sub http://${LoadBalancer.DNSName}
+    Export:
+      Name: !Sub ${EnvironmentName}-afcon-http-endpoint
+
+  GRPCEndpoint:
+    Description: gRPC service endpoint
+    Value: !If
+      - HasCertificate
+      - !Sub ${LoadBalancer.DNSName}:443
+      - !Sub ${LoadBalancer.DNSName}:50051
+    Export:
+      Name: !Sub ${EnvironmentName}-afcon-grpc-endpoint
+
+  DatabaseEndpoint:
+    Description: RDS PostgreSQL endpoint
+    Value: !GetAtt Database.Endpoint.Address
+    Export:
+      Name: !Sub ${EnvironmentName}-afcon-db-endpoint
+
+  RedisEndpoint:
+    Description: ElastiCache Redis primary endpoint
+    Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
+    Export:
+      Name: !Sub ${EnvironmentName}-afcon-redis-endpoint
+
+  ECRRepositoryURI:
+    Description: ECR repository URI for Docker images
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/afcon-server
+    Export:
+      Name: !Sub ${EnvironmentName}-afcon-ecr-uri
+
+  ECSClusterName:
+    Description: ECS cluster name
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub ${EnvironmentName}-afcon-cluster-name
+
+  ECSServiceName:
+    Description: ECS service name
+    Value: !GetAtt ECSService.Name
+    Export:
+      Name: !Sub ${EnvironmentName}-afcon-service-name

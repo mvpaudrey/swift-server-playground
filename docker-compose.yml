@@ -1,0 +1,136 @@
+# ============================================================================
+# Docker Compose Configuration for AFCON Swift gRPC Server
+# For local development and testing
+# ============================================================================
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: afcon-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-afcon}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - afcon-network
+
+  # Redis Cache (optional - for distributed caching)
+  redis:
+    image: redis:7-alpine
+    container_name: afcon-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - afcon-network
+
+  # AFCON Swift gRPC Server
+  afcon-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: afcon-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # HTTP REST API
+      - "50051:50051" # gRPC Service
+    environment:
+      # API Configuration
+      - API_FOOTBALL_KEY=${API_FOOTBALL_KEY}
+
+      # Server Configuration
+      - PORT=8080
+      - GRPC_PORT=50051
+      - ENVIRONMENT=development
+      - LOG_LEVEL=debug
+
+      # Database Configuration
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/afcon?sslmode=disable
+
+      # Redis Configuration (optional)
+      - REDIS_URL=redis://redis:6379
+
+      # League Initialization
+      - INIT_LEAGUES=${INIT_LEAGUES:-6:2025:AFCON 2025}
+      - AUTO_INIT=${AUTO_INIT:-true}
+
+      # Push Notification Configuration (optional - configure if testing notifications)
+      - APNS_KEY_ID=${APNS_KEY_ID:-}
+      - APNS_TEAM_ID=${APNS_TEAM_ID:-}
+      - APNS_KEY_PATH=${APNS_KEY_PATH:-/app/secrets/apns-key.p8}
+      - APNS_TOPIC=${APNS_TOPIC:-}
+      - APNS_ENVIRONMENT=${APNS_ENVIRONMENT:-sandbox}
+      - FCM_SERVER_KEY=${FCM_SERVER_KEY:-}
+    volumes:
+      # Mount secrets directory (for APNS certificates)
+      - ./secrets:/app/secrets:ro
+      # Mount logs directory
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - afcon-network
+
+  # pgAdmin (optional - for database management UI)
+  # Enable with: docker-compose --profile tools up
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: afcon-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@afcon.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_LISTEN_PORT: 5050
+    ports:
+      - "5050:5050"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - afcon-network
+    profiles:
+      - tools
+
+# Networks
+networks:
+  afcon-network:
+    driver: bridge
+
+# Volumes
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+

@@ -1,0 +1,34 @@
+Every 5,0s:                                                                                                                          MacBook-Pro-de-Audrey.local: 11:45:59
+                                                                                                                                                             in 0,722s (0)
+------------------------------------------------------------------------------------------------------------------                                                        
+|                                               DescribeStackEvents                                              |                                                        
++-----------------------------------+--------------------+-------------------------------+-----------------------+                                                        
+|  2025-12-24T10:01:59.975000+00:00 |  ROLLBACK_COMPLETE |  AWS::CloudFormation::Stack   |  afcon-dev            |                                                        
+|  2025-12-24T10:01:59.621000+00:00 |  DELETE_COMPLETE   |  AWS::SecretsManager::Secret  |  APNSSecret           |                                                        
+|  2025-12-24T10:01:59.560000+00:00 |  DELETE_COMPLETE   |  AWS::SecretsManager::Secret  |  APIFootballKeySecret |                                                        
+|  2025-12-24T10:01:59.515000+00:00 |  DELETE_COMPLETE   |  AWS::SecretsManager::Secret  |  FCMSecret            |                                                        
+|  2025-12-24T10:01:59.441000+00:00 |  DELETE_COMPLETE   |  AWS::SecretsManager::Secret  |  DBPasswordSecret     |                                                        
++-----------------------------------+--------------------+-------------------------------+-----------------------+                                                        
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          
+                                                                                                                                                                          

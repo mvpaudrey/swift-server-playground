@@ -1,0 +1,604 @@
+syntax = "proto3";
+
+package afcon;
+
+import "google/protobuf/timestamp.proto";
+
+// Service definition for AFCON data
+service AFCONService {
+  // Get league information
+  rpc GetLeague(LeagueRequest) returns (LeagueResponse);
+
+  // Get all teams in the league
+  rpc GetTeams(TeamsRequest) returns (TeamsResponse);
+
+  // Get fixtures for the league
+  rpc GetFixtures(FixturesRequest) returns (FixturesResponse);
+
+  // Get today's upcoming fixtures (not started yet)
+  rpc GetTodayUpcoming(TodayUpcomingRequest) returns (FixturesResponse);
+
+  // Get fixture by ID
+  rpc GetFixtureById(FixtureByIdRequest) returns (FixtureResponse);
+
+  // Get fixture events by ID
+  rpc GetFixtureEvents(FixtureEventsRequest) returns (FixtureEventsResponse);
+
+  // Get fixtures by date
+  rpc GetFixturesByDate(FixturesByDateRequest) returns (FixturesResponse);
+
+  // Get live match updates (server streaming)
+  rpc StreamLiveMatches(LiveMatchRequest) returns (stream LiveMatchUpdate);
+
+  // Get standings
+  rpc GetStandings(StandingsRequest) returns (StandingsResponse);
+
+  // Get team details
+  rpc GetTeamDetails(TeamDetailsRequest) returns (TeamDetailsResponse);
+
+  // Get fixture lineups
+  rpc GetLineups(LineupsRequest) returns (LineupsResponse);
+
+  // Get next upcoming fixtures (all games on the next match day)
+  rpc GetNextUpcoming(NextUpcomingRequest) returns (FixturesResponse);
+
+  // Sync fixtures from API to database (admin operation)
+  rpc SyncFixtures(SyncFixturesRequest) returns (SyncFixturesResponse);
+
+  // Push Notification Management
+  rpc RegisterDevice(RegisterDeviceRequest) returns (RegisterDeviceResponse);
+  rpc UpdateSubscriptions(UpdateSubscriptionsRequest) returns (UpdateSubscriptionsResponse);
+  rpc GetSubscriptions(GetSubscriptionsRequest) returns (GetSubscriptionsResponse);
+  rpc UnregisterDevice(UnregisterDeviceRequest) returns (UnregisterDeviceResponse);
+  rpc UpdateDeviceToken(UpdateDeviceTokenRequest) returns (UpdateDeviceTokenResponse);
+
+  // Live Activity Management
+  rpc StartLiveActivity(StartLiveActivityRequest) returns (StartLiveActivityResponse);
+  rpc UpdateLiveActivity(UpdateLiveActivityRequest) returns (UpdateLiveActivityResponse);
+  rpc EndLiveActivity(EndLiveActivityRequest) returns (EndLiveActivityResponse);
+  rpc GetActiveLiveActivities(GetActiveLiveActivitiesRequest) returns (GetActiveLiveActivitiesResponse);
+}
+
+// League Request/Response
+message LeagueRequest {
+  int32 league_id = 1;
+  int32 season = 2;
+}
+
+message LeagueResponse {
+  League league = 1;
+  Country country = 2;
+  repeated Season seasons = 3;
+}
+
+message League {
+  int32 id = 1;
+  string name = 2;
+  string type = 3;
+  string logo = 4;
+}
+
+message Country {
+  string name = 1;
+  string code = 2;
+  string flag = 3;
+}
+
+message Season {
+  int32 year = 1;
+  string start = 2;
+  string end = 3;
+  bool current = 4;
+  Coverage coverage = 5;
+}
+
+message Coverage {
+  FixtureCoverage fixtures = 1;
+  bool standings = 2;
+  bool players = 3;
+  bool top_scorers = 4;
+  bool top_assists = 5;
+  bool top_cards = 6;
+  bool injuries = 7;
+  bool predictions = 8;
+  bool odds = 9;
+}
+
+message FixtureCoverage {
+  bool events = 1;
+  bool lineups = 2;
+  bool statistics_fixtures = 3;
+  bool statistics_players = 4;
+}
+
+// Teams Request/Response
+message TeamsRequest {
+  int32 league_id = 1;
+  int32 season = 2;
+}
+
+message TeamsResponse {
+  repeated TeamInfo teams = 1;
+}
+
+message TeamInfo {
+  Team team = 1;
+  Venue venue = 2;
+}
+
+message Team {
+  int32 id = 1;
+  string name = 2;
+  string code = 3;
+  string country = 4;
+  int32 founded = 5;
+  bool national = 6;
+  string logo = 7;
+}
+
+message Venue {
+  int32 id = 1;
+  string name = 2;
+  string address = 3;
+  string city = 4;
+  int32 capacity = 5;
+  string surface = 6;
+  string image = 7;
+}
+
+// Fixtures Request/Response
+message FixturesRequest {
+  int32 league_id = 1;
+  int32 season = 2;
+  string date = 3; // Optional: YYYY-MM-DD format
+  int32 team_id = 4; // Optional: filter by team
+  bool live = 5; // Optional: get only live matches
+}
+
+message FixturesResponse {
+  repeated Fixture fixtures = 1;
+}
+
+// Today's Upcoming Fixtures Request
+message TodayUpcomingRequest {
+  int32 league_id = 1;
+  int32 season = 2;
+}
+
+// Get Fixture By ID Request
+message FixtureByIdRequest {
+  int32 fixture_id = 1;
+}
+
+// Single Fixture Response
+message FixtureResponse {
+  Fixture fixture = 1;
+}
+
+// Get Fixture Events Request
+message FixtureEventsRequest {
+  int32 fixture_id = 1;
+}
+
+// Fixture Event (goal, card, substitution, etc.)
+message FixtureEvent {
+  EventTime time = 1;
+  EventTeam team = 2;
+  EventPlayer player = 3;
+  EventPlayer assist = 4;
+  string type = 5;     // "Goal", "Card", "subst", "Var"
+  string detail = 6;   // "Normal Goal", "Yellow Card", etc.
+  string comments = 7; // Optional comments
+}
+
+message EventTime {
+  int32 elapsed = 1;
+  int32 extra = 2;
+}
+
+message EventTeam {
+  int32 id = 1;
+  string name = 2;
+  string logo = 3;
+}
+
+message EventPlayer {
+  int32 id = 1;
+  string name = 2;
+}
+
+// Fixture Events Response
+message FixtureEventsResponse {
+  repeated FixtureEvent events = 1;
+}
+
+// Get Fixtures By Date Request
+message FixturesByDateRequest {
+  string date = 1; // YYYY-MM-DD format
+  int32 league_id = 2; // Optional: filter by league
+  int32 season = 3; // Optional: required if league_id is set
+}
+
+// Get Next Upcoming Fixtures Request
+message NextUpcomingRequest {
+  int32 league_id = 1;
+  int32 season = 2;
+}
+
+message Fixture {
+  int32 id = 1;
+  string referee = 2;
+  string timezone = 3;
+  google.protobuf.Timestamp date = 4;
+  int32 timestamp = 5;
+  FixturePeriods periods = 6;
+  FixtureVenue venue = 7;
+  FixtureStatus status = 8;
+  FixtureTeams teams = 9;
+  FixtureGoals goals = 10;
+  FixtureScore score = 11;
+  FixtureLeague league = 12;
+}
+
+message FixtureLeague {
+  int32 id = 1;
+  string name = 2;
+  int32 season = 3;
+  string round = 4;
+}
+
+message FixturePeriods {
+  int32 first = 1;
+  int32 second = 2;
+}
+
+message FixtureVenue {
+  int32 id = 1;
+  string name = 2;
+  string city = 3;
+}
+
+message FixtureStatus {
+  string long = 1;
+  string short = 2;
+  int32 elapsed = 3;
+  int32 extra = 4;
+}
+
+message FixtureTeams {
+  FixtureTeam home = 1;
+  FixtureTeam away = 2;
+}
+
+message FixtureTeam {
+  int32 id = 1;
+  string name = 2;
+  string logo = 3;
+  bool winner = 4;
+}
+
+message FixtureGoals {
+  int32 home = 1;
+  int32 away = 2;
+}
+
+message FixtureScore {
+  ScoreDetail halftime = 1;
+  ScoreDetail fulltime = 2;
+  ScoreDetail extratime = 3;
+  ScoreDetail penalty = 4;
+}
+
+message ScoreDetail {
+  int32 home = 1;
+  int32 away = 2;
+}
+
+// Live Match Streaming
+message LiveMatchRequest {
+  int32 league_id = 1;
+  int32 season = 2;
+}
+
+message LiveMatchUpdate {
+  int32 fixture_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  string event_type = 3; // "goal", "card", "substitution", "status_update", "var"
+  Fixture fixture = 4;
+  FixtureEvent event = 5;
+  FixtureStatus status = 6; // Materialized status for easy access
+  repeated FixtureEvent recent_events = 7; // Recent events (last 5 minutes)
+}
+
+// Standings Request/Response
+message StandingsRequest {
+  int32 league_id = 1;
+  int32 season = 2;
+}
+
+message StandingsResponse {
+  repeated StandingGroup groups = 1;
+}
+
+message StandingGroup {
+  string group_name = 1;
+  repeated Standing standings = 2;
+}
+
+message Standing {
+  int32 rank = 1;
+  Team team = 2;
+  int32 points = 3;
+  int32 goals_diff = 4;
+  string group = 5;
+  string form = 6;
+  string status = 7;
+  string description = 8;
+  StandingStats all = 9;
+  StandingStats home = 10;
+  StandingStats away = 11;
+  google.protobuf.Timestamp update = 12;
+}
+
+message StandingStats {
+  int32 played = 1;
+  int32 win = 2;
+  int32 draw = 3;
+  int32 lose = 4;
+  StandingGoals goals = 5;
+}
+
+message StandingGoals {
+  int32 for = 1;
+  int32 against = 2;
+}
+
+// Team Details Request/Response
+message TeamDetailsRequest {
+  int32 team_id = 1;
+  int32 season = 2;
+}
+
+message TeamDetailsResponse {
+  Team team = 1;
+  Venue venue = 2;
+  repeated Player players = 3;
+}
+
+message Player {
+  int32 id = 1;
+  string name = 2;
+  string firstname = 3;
+  string lastname = 4;
+  int32 age = 5;
+  Birth birth = 6;
+  string nationality = 7;
+  string height = 8;
+  string weight = 9;
+  bool injured = 10;
+  string photo = 11;
+}
+
+message Birth {
+  string date = 1;
+  string place = 2;
+  string country = 3;
+}
+
+// Lineups Request/Response
+message LineupsRequest {
+  int32 fixture_id = 1;
+}
+
+message LineupsResponse {
+  repeated FixtureLineup lineups = 1;
+}
+
+message FixtureLineup {
+  LineupTeam team = 1;
+  LineupCoach coach = 2;
+  string formation = 3;
+  repeated LineupPlayerPosition start_xi = 4;
+  repeated LineupPlayerPosition substitutes = 5;
+}
+
+message LineupTeam {
+  int32 id = 1;
+  string name = 2;
+  string logo = 3;
+  TeamColors colors = 4;
+}
+
+message TeamColors {
+  ColorInfo player = 1;
+  ColorInfo goalkeeper = 2;
+}
+
+message ColorInfo {
+  string primary = 1;
+  string number = 2;
+  string border = 3;
+}
+
+message LineupCoach {
+  int32 id = 1;
+  string name = 2;
+  string photo = 3;
+}
+
+message LineupPlayerPosition {
+  LineupPlayer player = 1;
+  string grid = 2;
+}
+
+message LineupPlayer {
+  int32 id = 1;
+  string name = 2;
+  int32 number = 3;
+  string pos = 4;
+}
+
+// Sync Fixtures Request/Response
+message SyncFixturesRequest {
+  int32 league_id = 1;
+  int32 season = 2;
+  string competition = 3; // e.g., "AFCON 2025"
+}
+
+message SyncFixturesResponse {
+  bool success = 1;
+  int32 fixtures_synced = 2;
+  string message = 3;
+}
+
+// ============================================================================
+// Push Notification Messages
+// ============================================================================
+
+// Device Registration
+message RegisterDeviceRequest {
+  string user_id = 1;
+  string device_token = 2;
+  string platform = 3;  // "ios" or "android"
+  string device_id = 4;
+  string app_version = 5;
+  string os_version = 6;
+  string language = 7;
+  string timezone = 8;
+}
+
+message RegisterDeviceResponse {
+  bool success = 1;
+  string device_uuid = 2;  // UUID assigned by server
+  string message = 3;
+}
+
+// Update Device Token (for token refresh)
+message UpdateDeviceTokenRequest {
+  string device_uuid = 1;
+  string new_device_token = 2;
+}
+
+message UpdateDeviceTokenResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Subscription Management
+message UpdateSubscriptionsRequest {
+  string device_uuid = 1;
+  repeated Subscription subscriptions = 2;
+}
+
+message Subscription {
+  int32 league_id = 1;
+  int32 season = 2;
+  int32 team_id = 3;  // 0 = all teams in league
+  NotificationPreferences preferences = 4;
+}
+
+message NotificationPreferences {
+  bool notify_goals = 1;
+  bool notify_match_start = 2;
+  bool notify_match_end = 3;
+  bool notify_red_cards = 4;
+  bool notify_lineups = 5;
+  bool notify_var = 6;
+  int32 match_start_minutes_before = 7;  // 5, 10, 15, 30, 60
+}
+
+message UpdateSubscriptionsResponse {
+  bool success = 1;
+  int32 subscriptions_updated = 2;
+  string message = 3;
+}
+
+// Get Subscriptions
+message GetSubscriptionsRequest {
+  string device_uuid = 1;
+}
+
+message GetSubscriptionsResponse {
+  repeated Subscription subscriptions = 1;
+}
+
+// Unregister Device
+message UnregisterDeviceRequest {
+  string device_uuid = 1;
+}
+
+message UnregisterDeviceResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ============================================================================
+// Live Activity Messages
+// ============================================================================
+
+// Start Live Activity
+message StartLiveActivityRequest {
+  string device_uuid = 1;
+  int32 fixture_id = 2;
+  string activity_id = 3;  // iOS ActivityKit ID
+  string push_token = 4;   // Push-to-update token
+  string update_frequency = 5;  // "every_minute", "goals_only", "major_events", "all_events"
+}
+
+message StartLiveActivityResponse {
+  bool success = 1;
+  string message = 2;
+  string activity_uuid = 3;  // Server-assigned UUID
+}
+
+// Update Live Activity Preferences
+message UpdateLiveActivityRequest {
+  string activity_uuid = 1;
+  string update_frequency = 2;  // Change update frequency
+}
+
+message UpdateLiveActivityResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// End Live Activity
+message EndLiveActivityRequest {
+  string activity_uuid = 1;
+}
+
+message EndLiveActivityResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Get Active Live Activities
+message GetActiveLiveActivitiesRequest {
+  string device_uuid = 1;
+}
+
+message GetActiveLiveActivitiesResponse {
+  repeated LiveActivityInfo activities = 1;
+}
+
+message LiveActivityInfo {
+  string activity_uuid = 1;
+  int32 fixture_id = 2;
+  string activity_id = 3;
+  string update_frequency = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp expires_at = 6;
+}
+
+// Live Activity Content State (for push updates)
+message LiveActivityContentState {
+  int32 fixture_id = 1;
+  string home_team = 2;
+  string away_team = 3;
+  int32 home_score = 4;
+  int32 away_score = 5;
+  string status = 6;  // "NS", "1H", "HT", "2H", "ET", "FT"
+  int32 elapsed = 7;
+  string last_event = 8;  // "Goal by Salah 45'", "Red Card 67'", etc.
+  google.protobuf.Timestamp updated_at = 9;
+}

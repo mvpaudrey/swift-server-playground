@@ -1,0 +1,11 @@
+{
+  "id": 6,
+  "name": "Africa Cup of Nations",
+  "type": "Cup",
+  "logoURL": "https://media.api-sports.io/football/leagues/6.png",
+  "countryName": "World",
+  "countryCode": "WW",
+  "countryFlagURL": "https://media.api-sports.io/flags/ww.svg",
+  "season": 2025,
+  "lastUpdated": "2025-01-01T00:00:00Z"
+}
