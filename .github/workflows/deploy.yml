@@ -57,9 +57,10 @@ jobs:
       - name: Build
         run: swift build -c release
 
-      - name: Run tests
-        run: swift test --parallel
-        continue-on-error: true
+      # Skip tests - no test targets defined in Package.swift
+      # - name: Run tests
+      #   run: swift test --parallel
+      #   continue-on-error: true
 
   # ============================================================================
   # Build and Push Docker Image
