@@ -9,6 +9,7 @@ A high-performance middleware built with **Vapor (Swift 6.2)** that delivers rea
 - 🔔 **Push Notifications** - Goals, red cards, and major events via APNs
 - 💾 **Smart Caching** - PostgreSQL + Redis for efficient data delivery
 - ⚡ **Intelligent Polling** - Adapts polling frequency based on match schedules
+- 🔄 **Auto-Sync Fixtures** - Keeps database fresh with configurable background sync
 - 🔒 **Type-Safe** - Full Swift 6 concurrency and type safety
 - 🚀 **Production Ready** - Built with Vapor, tested and deployed
 
@@ -28,7 +29,41 @@ Server runs on:
 - **gRPC**: `0.0.0.0:50051`
 - **HTTP**: `0.0.0.0:8080`
 
-### 2. Build Your iOS App
+### 2. Manage the Server
+
+#### Stop the Server
+
+**Method 1: Graceful Shutdown (Recommended)**
+```bash
+# Press Ctrl+C in the terminal where server is running
+```
+
+**Method 2: Kill by Port**
+```bash
+# Graceful termination
+lsof -ti:8080 -ti:50051 | xargs kill -TERM
+
+# Force kill if needed
+lsof -ti:8080 -ti:50051 | xargs kill -9
+```
+
+**Method 3: Kill by Process Name**
+```bash
+# Graceful
+pkill -TERM -f "Run serve"
+
+# Force kill
+pkill -9 -f "Run serve"
+```
+
+#### Restart the Server
+```bash
+# Stop first (Ctrl+C or use kill commands above)
+# Then start again
+./start-server-with-apns.sh
+```
+
+### 3. Build Your iOS App
 
 ```swift
 import AFCONClient
@@ -147,10 +182,34 @@ Features:
 
 ### Data Flow
 
-1. **Server polls** API-Football every 15 seconds for live matches
-2. **gRPC clients** receive instant updates via streaming (< 100ms latency)
-3. **Live Activities** receive push updates via APNs for major events
-4. **Caching** minimizes API calls and improves response times
+1. **Automatic Fixture Sync** keeps database up-to-date (every 30 min by default)
+2. **Server polls** API-Football every 15 seconds for live matches
+3. **gRPC clients** receive instant updates via streaming (< 100ms latency)
+4. **Live Activities** receive push updates via APNs for major events
+5. **Caching** minimizes API calls and improves response times
+
+### Automatic Fixture Synchronization
+
+The server includes **FixtureSyncService** that automatically keeps fixture data fresh:
+
+- **Default Interval**: 30 minutes (configurable via `FIXTURE_SYNC_INTERVAL`)
+- **Auto-Start**: Enabled on server startup for all configured leagues
+- **Smart Updates**: Updates database and clears cache to ensure fresh data
+- **Zero Client Impact**: Happens in background, transparent to clients
+
+**How it works:**
+1. On server start, fixtures are fetched from API if database is empty
+2. Background service syncs all configured leagues periodically
+3. Database is updated (upserts - creates new, updates existing)
+4. Cache is invalidated to ensure next requests get fresh data
+
+**Manual sync via gRPC:**
+```bash
+grpcurl -plaintext \
+  -d '{"league_id": 6, "season": 2025, "competition": "AFCON2025"}' \
+  localhost:50051 \
+  afcon.AFCONService/SyncFixtures
+```
 
 ## 🚀 Installation
 
@@ -217,6 +276,11 @@ export REDIS_URL="redis://localhost:6379"
 export GRPC_PORT="50051"
 export PORT="8080"
 export PAUSE_AFCON_LIVE_MATCHES="true"  # Pause polling during development
+
+# Fixture Auto-Sync Configuration
+export FIXTURE_SYNC_INTERVAL="1800"  # Sync interval in seconds (default: 1800 = 30 min)
+export AUTO_INIT="true"  # Auto-fetch fixtures on startup (default: true)
+export INIT_LEAGUES="6:2025:AFCON2025"  # Leagues to auto-sync (format: id:season:name)
 ```
 
 ### Quick APNs Setup
@@ -428,6 +492,7 @@ swift-server-playground/
 │   │   ├── Services/
 │   │   │   ├── APIFootballClient.swift
 │   │   │   ├── CacheService.swift
+│   │   │   ├── FixtureSyncService.swift    # Auto-sync fixtures
 │   │   │   └── NotificationService.swift   # APNs & Live Activities
 │   │   ├── Repositories/
 │   │   │   └── FixtureRepository.swift

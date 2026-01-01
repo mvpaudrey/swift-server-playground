@@ -57,6 +57,11 @@ public final class LiveMatchBroadcaster: Sendable {
             // Start polling for this league if not already running
             startPollingIfNeeded(leagueID: leagueID, season: season)
 
+            // Send initial state to newly connected client
+            Task { [weak self] in
+                await self?.sendInitialState(to: continuation, leagueID: leagueID, season: season)
+            }
+
             // Handle client disconnect
             continuation.onTermination = { [weak self] _ in
                 self?.unsubscribe(subscriberID: subscriberID, leagueID: leagueID)
@@ -96,6 +101,94 @@ public final class LiveMatchBroadcaster: Sendable {
         // Stop polling if no more subscribers
         if remaining == 0 {
             stopPolling(leagueID: leagueID)
+        }
+    }
+
+    /// Send initial state to a newly connected client
+    /// This ensures clients receive current game state when reconnecting
+    private func sendInitialState(
+        to continuation: AsyncStream<Afcon_LiveMatchUpdate>.Continuation,
+        leagueID: Int,
+        season: Int
+    ) async {
+        do {
+            // Fetch today's fixtures from database
+            let todayFixtures = try await fixtureRepository.getFixturesForDate(
+                leagueId: leagueID,
+                season: season,
+                date: Date()
+            )
+
+            guard !todayFixtures.isEmpty else {
+                logger.debug("📭 No fixtures today for league \(leagueID) - no initial state to send")
+                return
+            }
+
+            logger.info("📤 Sending initial state: \(todayFixtures.count) fixture(s) for league \(leagueID)")
+
+            // Send each fixture as an update
+            for fixtureEntity in todayFixtures {
+                // Determine event type based on status
+                let eventType: String
+                let statusShort = fixtureEntity.statusShort
+
+                if statusShort == "FT" || statusShort == "AET" || statusShort == "PEN" {
+                    eventType = "match_finished"
+                } else if statusShort == "1H" || statusShort == "2H" || statusShort == "HT" ||
+                          statusShort == "ET" || statusShort == "BT" || statusShort == "P" {
+                    eventType = "match_live"
+                } else if statusShort == "NS" || statusShort == "TBD" {
+                    eventType = "match_scheduled"
+                } else {
+                    eventType = "status_update"
+                }
+
+                // Convert entity to update
+                var update = Afcon_LiveMatchUpdate()
+                update.fixtureID = Int32(fixtureEntity.apiFixtureId)
+                update.timestamp = Google_Protobuf_Timestamp(date: Date())
+                update.eventType = eventType
+
+                // Convert fixture entity to proto fixture
+                update.fixture = convertFixtureEntityToFixture(fixtureEntity)
+
+                // Add status
+                var status = Afcon_FixtureStatus()
+                status.long = fixtureEntity.statusLong
+                status.short = fixtureEntity.statusShort
+                status.elapsed = Int32(fixtureEntity.statusElapsed ?? 0)
+                update.status = status
+
+                // Try to fetch and include events for live/finished matches
+                if statusShort != "NS" && statusShort != "TBD" {
+                    do {
+                        let events = try await apiClient.getFixtureEvents(fixtureId: fixtureEntity.apiFixtureId)
+                        update.recentEvents = events
+                            .sorted { (event1, event2) -> Bool in
+                                let time1 = (event1.time?.elapsed ?? 0) + (event1.time?.extra ?? 0)
+                                let time2 = (event2.time?.elapsed ?? 0) + (event2.time?.extra ?? 0)
+                                return time1 < time2
+                            }
+                            .map { convertToFixtureEvent($0) }
+
+                        if let latestEvent = events.last {
+                            update.event = convertToFixtureEvent(latestEvent)
+                        }
+                    } catch {
+                        logger.debug("⚠️ Could not fetch events for fixture \(fixtureEntity.apiFixtureId): \(error)")
+                    }
+                }
+
+                // Send to client
+                continuation.yield(update)
+
+                logger.debug("  ✓ Sent \(eventType): \(fixtureEntity.homeTeamName) vs \(fixtureEntity.awayTeamName) (\(statusShort))")
+            }
+
+            logger.info("✅ Initial state sent to client for league \(leagueID)")
+
+        } catch {
+            logger.error("❌ Failed to send initial state for league \(leagueID): \(error)")
         }
     }
 
@@ -701,6 +794,69 @@ public final class LiveMatchBroadcaster: Sendable {
         protoEvent.comments = event.comments ?? ""
 
         return protoEvent
+    }
+
+    /// Convert FixtureEntity (database) to Afcon_Fixture (protobuf)
+    private func convertFixtureEntityToFixture(_ entity: FixtureEntity) -> Afcon_Fixture {
+        var fixture = Afcon_Fixture()
+        fixture.id = Int32(entity.apiFixtureId)
+        fixture.referee = entity.referee ?? ""
+        fixture.timezone = entity.timezone
+        fixture.timestamp = Int32(entity.timestamp)
+        fixture.date = Google_Protobuf_Timestamp(date: entity.date)
+
+        var periods = Afcon_FixturePeriods()
+        periods.first = Int32(entity.periodFirst ?? 0)
+        periods.second = Int32(entity.periodSecond ?? 0)
+        fixture.periods = periods
+
+        var venue = Afcon_FixtureVenue()
+        venue.id = Int32(entity.venueId)
+        venue.name = entity.venueName
+        venue.city = entity.venueCity ?? ""
+        fixture.venue = venue
+
+        var status = Afcon_FixtureStatus()
+        status.long = entity.statusLong
+        status.short = entity.statusShort
+        status.elapsed = Int32(entity.statusElapsed ?? 0)
+        fixture.status = status
+
+        var teams = Afcon_FixtureTeams()
+        var home = Afcon_FixtureTeam()
+        home.id = Int32(entity.homeTeamId)
+        home.name = entity.homeTeamName
+        home.logo = entity.homeTeamLogo ?? ""
+        home.winner = entity.homeTeamWinner ?? false
+        teams.home = home
+
+        var away = Afcon_FixtureTeam()
+        away.id = Int32(entity.awayTeamId)
+        away.name = entity.awayTeamName
+        away.logo = entity.awayTeamLogo ?? ""
+        away.winner = entity.awayTeamWinner ?? false
+        teams.away = away
+        fixture.teams = teams
+
+        var goals = Afcon_FixtureGoals()
+        goals.home = Int32(entity.homeGoals ?? 0)
+        goals.away = Int32(entity.awayGoals ?? 0)
+        fixture.goals = goals
+
+        var score = Afcon_FixtureScore()
+        var halftime = Afcon_ScoreDetail()
+        halftime.home = Int32(entity.halftimeHome ?? 0)
+        halftime.away = Int32(entity.halftimeAway ?? 0)
+        score.halftime = halftime
+
+        var fulltime = Afcon_ScoreDetail()
+        fulltime.home = Int32(entity.fulltimeHome ?? 0)
+        fulltime.away = Int32(entity.fulltimeAway ?? 0)
+        score.fulltime = fulltime
+
+        fixture.score = score
+
+        return fixture
     }
 }
 

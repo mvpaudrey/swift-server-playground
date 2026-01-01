@@ -72,10 +72,10 @@ Parameters:
 
   DesiredCount:
     Type: Number
-    Default: 2
-    MinValue: 1
+    Default: 0
+    MinValue: 0
     MaxValue: 10
-    Description: Desired number of ECS tasks
+    Description: Desired number of ECS tasks (set to 0 for initial deployment, then scale up after pushing Docker image)
 
   MaxCount:
     Type: Number
@@ -268,6 +268,11 @@ Resources:
           ToPort: 443
           CidrIp: 0.0.0.0/0
           Description: Allow HTTPS/gRPC from anywhere
+        - IpProtocol: tcp
+          FromPort: 50051
+          ToPort: 50051
+          CidrIp: 0.0.0.0/0
+          Description: Allow gRPC from anywhere
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-alb-sg
@@ -284,10 +289,15 @@ Resources:
           SourceSecurityGroupId: !Ref ALBSecurityGroup
           Description: Allow HTTP from ALB
         - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: !Ref VpcCIDR
+          Description: Allow HTTP health checks from NLB (within VPC)
+        - IpProtocol: tcp
           FromPort: 50051
           ToPort: 50051
-          SourceSecurityGroupId: !Ref ALBSecurityGroup
-          Description: Allow gRPC from ALB
+          CidrIp: !Ref VpcCIDR
+          Description: Allow gRPC from NLB (within VPC)
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-ecs-sg
@@ -353,7 +363,7 @@ Resources:
     DeletionPolicy: Snapshot
     Properties:
       Engine: postgres
-      EngineVersion: '15.4'
+      EngineVersion: '15.15'
       DBInstanceClass: !Ref DBInstanceClass
       AllocatedStorage: 20
       StorageType: gp3
@@ -445,28 +455,6 @@ Resources:
         - Key: Name
           Value: !Sub ${EnvironmentName}-http-tg
 
-  # gRPC Target Group
-  GRPCTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: !Sub ${EnvironmentName}-grpc-tg
-      Port: 50051
-      Protocol: HTTP
-      ProtocolVersion: GRPC
-      VpcId: !Ref VPC
-      TargetType: ip
-      HealthCheckEnabled: true
-      HealthCheckPath: /
-      HealthCheckProtocol: HTTP
-      HealthCheckPort: '8080'
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-grpc-tg
-
   # HTTP Listener (port 80)
   HTTPListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -490,7 +478,7 @@ Resources:
             - !Ref AWS::NoValue
             - !Ref HTTPTargetGroup
 
-  # HTTPS Listener (port 443) - for gRPC and HTTPS
+  # HTTPS Listener (port 443) - for HTTPS API
   HTTPSListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Condition: HasCertificate
@@ -502,7 +490,55 @@ Resources:
         - CertificateArn: !Ref CertificateArn
       DefaultActions:
         - Type: forward
-          TargetGroupArn: !Ref GRPCTargetGroup
+          TargetGroupArn: !Ref HTTPTargetGroup
+
+  # ========================================
+  # Network Load Balancer for gRPC
+  # ========================================
+  GRPCNetworkLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${EnvironmentName}-grpc-nlb
+      Type: network
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-grpc-nlb
+
+  # gRPC Target Group for NLB (TCP protocol)
+  GRPCNLBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-grpc-nlb-tg
+      Port: 50051
+      Protocol: TCP
+      VpcId: !Ref VPC
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /health
+      HealthCheckPort: '8080'
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-grpc-nlb-tg
+
+  # NLB Listener for gRPC (port 50051)
+  GRPCNLBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref GRPCNetworkLoadBalancer
+      Port: 50051
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref GRPCNLBTargetGroup
 
   # ========================================
   # ECR Repository
@@ -638,13 +674,15 @@ Resources:
               Value: info
             - Name: DATABASE_URL
               Value: !Sub
-                - 'postgres://postgres:{{resolve:secretsmanager:${SecretArn}:SecretString:password}}@${DBEndpoint}:5432/afcon'
+                - 'postgres://postgres:{{resolve:secretsmanager:${SecretArn}:SecretString:password}}@${DBEndpoint}:5432/afcon?sslmode=require'
                 - SecretArn: !Ref DBPasswordSecret
                   DBEndpoint: !GetAtt Database.Endpoint.Address
             - Name: REDIS_URL
               Value: !Sub 'redis://${RedisReplicationGroup.PrimaryEndPoint.Address}:6379'
             - Name: INIT_LEAGUES
               Value: '6:2025:AFCON 2025'
+            - Name: APNS_ENVIRONMENT
+              Value: development
           Secrets:
             - Name: API_FOOTBALL_KEY
               ValueFrom: !Sub '${APIFootballKeySecret}:api_key::'
@@ -654,6 +692,8 @@ Resources:
               ValueFrom: !Sub '${APNSSecret}:team_id::'
             - Name: APNS_TOPIC
               ValueFrom: !Sub '${APNSSecret}:topic::'
+            - Name: APNS_KEY
+              ValueFrom: !Sub '${APNSSecret}:key::'
             - Name: FCM_SERVER_KEY
               ValueFrom: !Sub '${FCMSecret}:server_key::'
           LogConfiguration:
@@ -668,6 +708,7 @@ Resources:
     Type: AWS::ECS::Service
     DependsOn:
       - HTTPListener
+      - GRPCNLBListener
     Properties:
       ServiceName: afcon-service
       Cluster: !Ref ECSCluster
@@ -688,7 +729,7 @@ Resources:
           TargetGroupArn: !Ref HTTPTargetGroup
         - ContainerName: afcon-server
           ContainerPort: 50051
-          TargetGroupArn: !Ref GRPCTargetGroup
+          TargetGroupArn: !Ref GRPCNLBTargetGroup
       DeploymentConfiguration:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
@@ -801,11 +842,8 @@ Outputs:
       Name: !Sub ${EnvironmentName}-afcon-http-endpoint
 
   GRPCEndpoint:
-    Description: gRPC service endpoint
-    Value: !If
-      - HasCertificate
-      - !Sub ${LoadBalancer.DNSName}:443
-      - !Sub ${LoadBalancer.DNSName}:50051
+    Description: gRPC service endpoint (via Network Load Balancer)
+    Value: !Sub ${GRPCNetworkLoadBalancer.DNSName}:50051
     Export:
       Name: !Sub ${EnvironmentName}-afcon-grpc-endpoint
 

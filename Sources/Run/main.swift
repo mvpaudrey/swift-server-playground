@@ -63,9 +63,14 @@ struct Main {
         let notificationService: NotificationService = app.getService()
         let deviceRepository: DeviceRepository = app.getService()
         let broadcaster: LiveMatchBroadcaster = app.getService()
+        let fixtureSyncService: FixtureSyncService = app.getService()
+        let liveActivityAutoService: LiveActivityAutoService = app.getService()
 
         // Start notification service cleanup task
         await notificationService.startCleanupTask()
+
+        // Start automatic Live Activity creation service
+        liveActivityAutoService.start()
 
         // Create FixtureRepository with database connection
         let db: any Database = app.db
@@ -91,6 +96,13 @@ struct Main {
         //   AUTO_INIT=false
         let leagues = parseInitLeaguesFromEnvironment(logger: app.logger)
         await serviceProvider.initializeFixtures(leagues: leagues)
+
+        // Start automatic fixture sync for configured leagues
+        // This will keep the database up-to-date by syncing from API periodically
+        // Configure sync interval with FIXTURE_SYNC_INTERVAL env var (in seconds, default: 1800 = 30 min)
+        if !leagues.isEmpty {
+            fixtureSyncService.startAutoSync(leagues: leagues)
+        }
 
         // Configure gRPC server with grpc-swift 2.x API
         let server = GRPCServer(

@@ -424,5 +424,44 @@ public func routes(_ app: Application) throws {
         return .noContent
     }
 
+    // MARK: - Test/Admin Endpoints
+
+    // Update fixture date for testing (admin only)
+    api.post("test", "fixture", ":id", "update-date") { req async throws -> [String: Any] in
+        guard let fixtureId = req.parameters.get("id", as: Int.self) else {
+            throw Abort(.badRequest, reason: "Invalid fixture ID")
+        }
+
+        struct UpdateDateRequest: Content {
+            let minutesFromNow: Int
+        }
+
+        let updateRequest = try req.content.decode(UpdateDateRequest.self)
+
+        // Find the fixture in the database
+        guard let fixture = try await FixtureEntity.query(on: req.db)
+            .filter(\.$apiFixtureId == fixtureId)
+            .first() else {
+            throw Abort(.notFound, reason: "Fixture not found in database")
+        }
+
+        // Update the fixture date
+        let newDate = Date().addingTimeInterval(TimeInterval(updateRequest.minutesFromNow * 60))
+        fixture.date = newDate
+        try await fixture.save(on: req.db)
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        return [
+            "success": true,
+            "fixtureId": fixtureId,
+            "homeTeam": fixture.homeTeamName,
+            "awayTeam": fixture.awayTeamName,
+            "newDate": formatter.string(from: newDate),
+            "minutesFromNow": updateRequest.minutesFromNow
+        ]
+    }
+
     app.logger.info("✅ HTTP routes configured")
 }

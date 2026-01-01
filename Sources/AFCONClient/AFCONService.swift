@@ -124,6 +124,78 @@ public final class AFCONService: Sendable {
             return
         }
     }
+
+    // MARK: - Push Notification Methods
+
+    /// Register device for push notifications
+    public func registerDevice(
+        userId: String,
+        deviceToken: String,
+        platform: String = "ios",
+        deviceId: String,
+        appVersion: String,
+        osVersion: String,
+        language: String = "en",
+        timezone: String
+    ) async throws -> Afcon_RegisterDeviceResponse {
+        var request = Afcon_RegisterDeviceRequest()
+        request.userID = userId
+        request.deviceToken = deviceToken
+        request.platform = platform
+        request.deviceID = deviceId
+        request.appVersion = appVersion
+        request.osVersion = osVersion
+        request.language = language
+        request.timezone = timezone
+
+        return try await client.registerDevice(request)
+    }
+
+    /// Start a Live Activity for a fixture
+    public func startLiveActivity(
+        deviceUuid: String,
+        fixtureId: Int32,
+        activityId: String,
+        pushToken: String,
+        updateFrequency: String = "all_events"
+    ) async throws -> Afcon_StartLiveActivityResponse {
+        var request = Afcon_StartLiveActivityRequest()
+        request.deviceUuid = deviceUuid
+        request.fixtureID = fixtureId
+        request.activityID = activityId
+        request.pushToken = pushToken
+        request.updateFrequency = updateFrequency
+
+        return try await client.startLiveActivity(request)
+    }
+
+    /// End a Live Activity
+    public func endLiveActivity(activityUuid: String) async throws -> Afcon_EndLiveActivityResponse {
+        var request = Afcon_EndLiveActivityRequest()
+        request.activityUuid = activityUuid
+
+        return try await client.endLiveActivity(request)
+    }
+
+    /// Update subscriptions for device
+    public func updateSubscriptions(
+        deviceUuid: String,
+        subscriptions: [Afcon_Subscription]
+    ) async throws -> Afcon_UpdateSubscriptionsResponse {
+        var request = Afcon_UpdateSubscriptionsRequest()
+        request.deviceUuid = deviceUuid
+        request.subscriptions = subscriptions
+
+        return try await client.updateSubscriptions(request)
+    }
+
+    /// Get subscriptions for device
+    public func getSubscriptions(deviceUuid: String) async throws -> Afcon_GetSubscriptionsResponse {
+        var request = Afcon_GetSubscriptionsRequest()
+        request.deviceUuid = deviceUuid
+
+        return try await client.getSubscriptions(request)
+    }
 }
 
 // MARK: - Shared Instance

@@ -18,7 +18,7 @@ struct MatchContentState: Codable {
 
 /// Empty content state for dismissing Live Activities
 struct EmptyContentState: Codable {}
-import APNSCore
+@preconcurrency import APNSCore
 
 /// Actor-based notification service with APNSwift v5+ for Swift 6 compliance
 /// Handles push notifications (iOS/Android) and Live Activity updates
@@ -56,11 +56,28 @@ public actor NotificationService {
         // Parse APNs configuration without initializing client yet
         if let keyId = Environment.get("APNS_KEY_ID"),
            let teamId = Environment.get("APNS_TEAM_ID"),
-           let keyPath = Environment.get("APNS_KEY_PATH"),
            let topic = Environment.get("APNS_TOPIC") {
 
             do {
-                let keyData = try String(contentsOfFile: keyPath, encoding: .utf8)
+                // Support both APNS_KEY (direct content) and APNS_KEY_PATH (file path)
+                let keyData: String
+                if let keyContent = Environment.get("APNS_KEY") {
+                    keyData = keyContent
+                    logger.info("📱 Using APNs key from APNS_KEY environment variable")
+                } else if let keyPath = Environment.get("APNS_KEY_PATH") {
+                    keyData = try String(contentsOfFile: keyPath, encoding: .utf8)
+                    logger.info("📱 Using APNs key from file: \(keyPath)")
+                } else {
+                    logger.warning("⚠️ APNs key not found (set APNS_KEY or APNS_KEY_PATH)")
+                    self.apnsConfig = nil
+                    self.fcmServerKey = Environment.get("FCM_SERVER_KEY")
+                    if fcmServerKey == nil {
+                        logger.warning("⚠️ FCM server key not configured")
+                    }
+                    self.cleanupTask = nil
+                    return
+                }
+
                 let environment: APNSEnvironment =
                     Environment.get("APNS_ENVIRONMENT") == "production" ? .production : .development
 
@@ -74,11 +91,11 @@ public actor NotificationService {
 
                 logger.info("✅ APNs configuration loaded (\(environment.url))")
             } catch {
-                logger.error("❌ Failed to load APNs key file: \(error)")
+                logger.error("❌ Failed to load APNs key: \(error)")
                 self.apnsConfig = nil
             }
         } else {
-            logger.warning("⚠️ APNs credentials not configured (APNS_KEY_ID, APNS_TEAM_ID, APNS_KEY_PATH, APNS_TOPIC)")
+            logger.warning("⚠️ APNs credentials not configured (APNS_KEY_ID, APNS_TEAM_ID, APNS_TOPIC required)")
             self.apnsConfig = nil
         }
 
@@ -486,7 +503,7 @@ public actor NotificationService {
             payload: data
         )
 
-        try await client.sendAlertNotification(
+        _ = try await client.sendAlertNotification(
             alert,
             deviceToken: deviceToken
         )
@@ -662,7 +679,7 @@ public actor NotificationService {
             )
 
             // Send the notification
-            try await apnsClient.sendLiveActivityNotification(
+            _ = try await apnsClient.sendLiveActivityNotification(
                 notification,
                 deviceToken: pushToken
             )
@@ -697,7 +714,7 @@ public actor NotificationService {
                 timestamp: dismissalDate
             )
 
-            try await apnsClient.sendLiveActivityNotification(
+            _ = try await apnsClient.sendLiveActivityNotification(
                 notification,
                 deviceToken: pushToken
             )

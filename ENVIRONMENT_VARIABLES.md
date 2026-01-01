@@ -19,6 +19,16 @@ This document describes all environment variables that can be used to configure 
 - **Default**: `postgresql://postgres:postgres@localhost:5432/afcon`
 - **Example**: `DATABASE_URL=postgresql://user:password@host:5432/dbname`
 
+### PGSSLMODE
+- **Description**: PostgreSQL SSL mode (used when `DATABASE_URL` does not include `sslmode`)
+- **Default**: `prefer` (or `verify-full` when `PGSSLROOTCERT` is set)
+- **Example**: `PGSSLMODE=verify-full`
+
+### PGSSLROOTCERT
+- **Description**: Path to the PEM-encoded CA bundle for TLS verification
+- **Default**: unset
+- **Example**: `PGSSLROOTCERT=/app/secrets/rds-ca-bundle.pem`
+
 ### API_FOOTBALL_KEY
 - **Description**: API key for API-Football.com
 - **Required**: Yes (for production use)

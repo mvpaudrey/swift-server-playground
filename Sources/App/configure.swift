@@ -2,6 +2,7 @@ import Vapor
 import GRPCCore
 import Fluent
 import FluentPostgresDriver
+import NIOSSL
 
 /// Configure the Vapor application
 public func configure(_ app: Application) async throws {
@@ -21,15 +22,58 @@ public func configure(_ app: Application) async throws {
 
     if let databaseURL = Environment.get("DATABASE_URL"),
        let url = URL(string: databaseURL),
-       var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) {
-        // Ensure sslmode is set if not provided (Heroku-style URLs)
-        var queryItems = comps.queryItems ?? []
-        if !queryItems.contains(where: { $0.name == "sslmode" }) {
-            queryItems.append(URLQueryItem(name: "sslmode", value: "prefer"))
+       let comps = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+        //Extract sslmode from URL query parameters
+        let sslMode = comps.queryItems?.first(where: { $0.name == "sslmode" })?.value
+
+        // Parse URL components
+        guard let hostname = comps.host else {
+            app.logger.error("No hostname in DATABASE_URL")
+            return
         }
-        comps.queryItems = queryItems
-        if let final = comps.url { try app.databases.use(.postgres(url: final), as: .psql) }
+        let port = comps.port ?? 5432
+        let username = comps.user ?? "postgres"
+        let password = comps.password ?? "postgres"
+        let database = comps.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+
+        // Configure TLS based on sslmode
+        var tlsConfiguration: TLSConfiguration? = nil
+        if sslMode == "require" {
+            // Use TLS without certificate verification for sslmode=require
+            var tls = TLSConfiguration.makeClientConfiguration()
+            tls.certificateVerification = .none
+            tlsConfiguration = tls
+            app.logger.info("Configuring PostgreSQL with TLS (sslmode=require, no certificate verification)")
+        } else if let sslRootCertPath = Environment.get("PGSSLROOTCERT") {
+            // Use TLS with certificate verification if cert path is provided
+            let certificates = try NIOSSLCertificate.fromPEMFile(sslRootCertPath)
+            var tls = TLSConfiguration.makeClientConfiguration()
+            tls.trustRoots = .certificates(certificates)
+            tls.certificateVerification = .fullVerification
+            tlsConfiguration = tls
+            app.logger.info("Configuring PostgreSQL with TLS (full certificate verification)")
+        } else {
+            app.logger.info("Configuring PostgreSQL without TLS")
+        }
+
+        // Create PostgreSQL configuration with explicit parameters
+        app.databases.use(.postgres(
+            hostname: hostname,
+            port: port,
+            username: username,
+            password: password,
+            database: database,
+            tlsConfiguration: tlsConfiguration
+        ), as: .psql)
     } else {
+        var tlsConfiguration: TLSConfiguration? = nil
+        if let sslRootCertPath = Environment.get("PGSSLROOTCERT") {
+            let certificates = try NIOSSLCertificate.fromPEMFile(sslRootCertPath)
+            var tls = TLSConfiguration.makeClientConfiguration()
+            tls.trustRoots = .certificates(certificates)
+            tls.certificateVerification = .fullVerification
+            tlsConfiguration = tls
+        }
         let hostname = Environment.get("PGHOST") ?? "127.0.0.1"
         let port = Environment.get("PGPORT").flatMap(Int.init) ?? 5432
         let username = Environment.get("PGUSER") ?? "postgres"
@@ -41,7 +85,7 @@ public func configure(_ app: Application) async throws {
             username: username,
             password: password,
             database: database,
-            tlsConfiguration: nil
+            tlsConfiguration: tlsConfiguration
         ), as: .psql)
     }
 
@@ -123,6 +167,42 @@ public func configure(_ app: Application) async throws {
             apiClient: apiClient,
             fixtureRepository: fixtureRepository,
             cacheService: cacheService,
+            logger: app.logger
+        )
+    }
+
+    // Register Fixture Sync Service
+    app.services.use { app -> FixtureSyncService in
+        guard let db = app.db as? any Database else {
+            fatalError("Database not configured")
+        }
+        let apiClient: APIFootballClient = app.getService()
+        let cacheService: CacheService = app.getService()
+        let fixtureRepository = FixtureRepository(db: db, logger: app.logger)
+
+        // Get sync interval from environment (default: 30 minutes)
+        let syncInterval = Environment.get("FIXTURE_SYNC_INTERVAL")
+            .flatMap(TimeInterval.init) ?? 1800
+
+        return FixtureSyncService(
+            apiClient: apiClient,
+            fixtureRepository: fixtureRepository,
+            cacheService: cacheService,
+            logger: app.logger,
+            syncInterval: syncInterval
+        )
+    }
+
+    // Register Live Activity Auto Service
+    app.services.use { app -> LiveActivityAutoService in
+        guard let db = app.db as? any Database else {
+            fatalError("Database not configured")
+        }
+        let notificationService: NotificationService = app.getService()
+
+        return LiveActivityAutoService(
+            db: db,
+            notificationService: notificationService,
             logger: app.logger
         )
     }

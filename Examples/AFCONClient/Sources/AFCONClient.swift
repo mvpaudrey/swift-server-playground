@@ -6,7 +6,7 @@ import Foundation
 
 @main
 struct AFCONClientExample {
-    static let serverHost = "localhost"
+    static let serverHost = "staging-afcon-alb-1927452812.eu-north-1.elb.amazonaws.com"
     static let serverPort = 50051
     static let afconLeagueId: Int32 = 6
     static let season: Int32 = 2025

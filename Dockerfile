@@ -29,17 +29,17 @@ COPY . .
 
 # Build the project in release mode with optimizations
 # Only build the Run product (excludes test targets like GRPCClient)
-RUN swift build -c release --product Run \
-    --static-swift-stdlib \
-    -Xlinker -s
+RUN swift build -c release --product Run
 
 # ============================================================================
 # Stage 2: Runtime Stage
 # ============================================================================
-FROM ubuntu:22.04
+FROM swift:6.0-jammy-slim
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \
+    && apt-get -q update \
+    && apt-get -q install -y \
     ca-certificates \
     libcurl4 \
     libssl3 \
@@ -62,6 +62,11 @@ COPY --from=build --chown=afcon:afcon /build/Protos /app/Protos
 
 # Create directories for secrets and logs
 RUN mkdir -p /app/secrets /app/logs && chown -R afcon:afcon /app
+
+# Fetch AWS RDS CA bundle for TLS verification (override with build arg if needed)
+ARG RDS_CA_BUNDLE_URL=https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+RUN curl -fsSL "${RDS_CA_BUNDLE_URL}" -o /app/secrets/rds-ca-bundle.pem \
+    && chown afcon:afcon /app/secrets/rds-ca-bundle.pem
 
 # Switch to non-root user
 USER afcon:afcon
