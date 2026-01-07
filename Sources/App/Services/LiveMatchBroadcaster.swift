@@ -83,6 +83,11 @@ public final class LiveMatchBroadcaster: Sendable {
         }
     }
 
+    /// Start polling even without active gRPC subscribers (for notification delivery).
+    public func startNotificationPolling(leagueID: Int, season: Int) {
+        startPollingIfNeeded(leagueID: leagueID, season: season)
+    }
+
     // MARK: - Private Implementation
 
     private func unsubscribe(subscriberID: UUID, leagueID: Int) {
@@ -237,9 +242,23 @@ public final class LiveMatchBroadcaster: Sendable {
             do {
                 // Check if we still have subscribers
                 let subscriberCount = getSubscriberCount(for: leagueID)
-                guard subscriberCount > 0 else {
-                    logger.info("⏹️ No subscribers left for league \(leagueID), stopping poll loop")
-                    break
+                if subscriberCount == 0 {
+                    let hasNotificationSubscribers: Bool
+                    if let notificationService = notificationService {
+                        hasNotificationSubscribers = (try? await notificationService.hasNotificationSubscribers(
+                            leagueId: leagueID,
+                            season: season
+                        )) ?? false
+                    } else {
+                        hasNotificationSubscribers = false
+                    }
+
+                    guard hasNotificationSubscribers else {
+                        logger.info("⏹️ No subscribers left for league \(leagueID), stopping poll loop")
+                        break
+                    }
+
+                    logger.debug("🔔 Polling league \(leagueID) for notification subscribers (no gRPC clients)")
                 }
 
                 let hasUnfinishedToday = await hasUnfinishedFixturesToday(

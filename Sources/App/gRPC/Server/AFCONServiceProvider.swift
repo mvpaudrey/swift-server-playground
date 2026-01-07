@@ -1131,8 +1131,11 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
         }
 
         var response = Afcon_StandingsResponse()
-        // Convert standings data
-        // Note: Implementation depends on API structure
+        for standingsItem in standingsData {
+            for (index, group) in standingsItem.league.standings.enumerated() {
+                response.groups.append(convertToStandingGroup(group, index: index))
+            }
+        }
         return ServerResponse(message: response)
     }
 
@@ -1662,6 +1665,63 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
         return protoLineup
     }
 
+    private func convertToStandingGroup(_ group: [StandingInfo], index: Int) -> Afcon_StandingGroup {
+        var protoGroup = Afcon_StandingGroup()
+        if let first = group.first, !first.group.isEmpty {
+            protoGroup.groupName = first.group
+        } else {
+            protoGroup.groupName = "Group \(index + 1)"
+        }
+        protoGroup.standings = group.map { convertToStanding($0) }
+        return protoGroup
+    }
+
+    private func convertToStanding(_ standing: StandingInfo) -> Afcon_Standing {
+        var protoStanding = Afcon_Standing()
+        protoStanding.rank = Int32(standing.rank)
+        protoStanding.team = convertToStandingTeam(standing.team)
+        protoStanding.points = Int32(standing.points)
+        protoStanding.goalsDiff = Int32(standing.goalsDiff)
+        protoStanding.group = standing.group
+        protoStanding.form = standing.form ?? ""
+        protoStanding.status = standing.status ?? ""
+        protoStanding.description_p = standing.description ?? ""
+        protoStanding.all = convertToStandingStats(standing.all)
+        protoStanding.home = convertToStandingStats(standing.home)
+        protoStanding.away = convertToStandingStats(standing.away)
+
+        let formatter = ISO8601DateFormatter()
+        if let date = formatter.date(from: standing.update) {
+            protoStanding.update = Google_Protobuf_Timestamp(date: date)
+        }
+        return protoStanding
+    }
+
+    private func convertToStandingTeam(_ team: StandingTeamInfo) -> Afcon_Team {
+        var protoTeam = Afcon_Team()
+        protoTeam.id = Int32(team.id)
+        protoTeam.name = team.name
+        protoTeam.logo = team.logo
+        return protoTeam
+    }
+
+    private func convertToStandingStats(_ stats: StandingStatsInfo) -> Afcon_StandingStats {
+        var protoStats = Afcon_StandingStats()
+        protoStats.played = Int32(stats.played)
+        protoStats.win = Int32(stats.win)
+        protoStats.draw = Int32(stats.draw)
+        protoStats.lose = Int32(stats.lose)
+        protoStats.goals = convertToStandingGoals(stats.goals)
+        return protoStats
+    }
+
+    private func convertToStandingGoals(_ goals: StandingGoalsInfo) -> Afcon_StandingGoals {
+        var protoGoals = Afcon_StandingGoals()
+        protoGoals.for = Int32(goals.for)
+        protoGoals.against = Int32(goals.against)
+        return protoGoals
+    }
+
     // MARK: - Push Notification Management
 
     /// Register a device for push notifications
@@ -1748,6 +1808,19 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
             deviceUUID: deviceUUID,
             subscriptions: subscriptions
         )
+
+        if !subscriptions.isEmpty {
+            var seenKeys = Set<String>()
+            for subscription in subscriptions {
+                let key = "\(subscription.leagueId):\(subscription.season)"
+                if seenKeys.insert(key).inserted {
+                    broadcaster.startNotificationPolling(
+                        leagueID: subscription.leagueId,
+                        season: subscription.season
+                    )
+                }
+            }
+        }
 
         var response = Afcon_UpdateSubscriptionsResponse()
         response.success = true

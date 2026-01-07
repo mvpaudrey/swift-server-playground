@@ -473,6 +473,32 @@ public actor NotificationService {
         return activities
     }
 
+    /// Check if any devices are subscribed to notifications for a league/season.
+    public func hasNotificationSubscribers(leagueId: Int, season: Int) async throws -> Bool {
+        let count = try await db.query(NotificationSubscriptionEntity.self)
+            .filter(\.$leagueId == leagueId)
+            .filter(\.$season == season)
+            .count()
+        return count > 0
+    }
+
+    /// Return unique league/season pairs that have notification subscriptions.
+    public func getNotificationSubscriptionLeagues() async throws -> [(leagueId: Int, season: Int)] {
+        let subscriptions = try await db.query(NotificationSubscriptionEntity.self).all()
+        var seen = Set<String>()
+        var pairs: [(leagueId: Int, season: Int)] = []
+        pairs.reserveCapacity(subscriptions.count)
+
+        for subscription in subscriptions {
+            let key = "\(subscription.leagueId):\(subscription.season)"
+            if seen.insert(key).inserted {
+                pairs.append((leagueId: subscription.leagueId, season: subscription.season))
+            }
+        }
+
+        return pairs
+    }
+
     // MARK: - Private Methods
 
     /// Send Apple Push Notification

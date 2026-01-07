@@ -72,6 +72,24 @@ struct Main {
         // Start automatic Live Activity creation service
         liveActivityAutoService.start()
 
+        // Start polling for leagues with existing notification subscriptions
+        do {
+            let notificationLeagues = try await notificationService.getNotificationSubscriptionLeagues()
+            if notificationLeagues.isEmpty {
+                app.logger.info("🔕 No notification subscriptions found at startup")
+            } else {
+                for league in notificationLeagues {
+                    broadcaster.startNotificationPolling(
+                        leagueID: league.leagueId,
+                        season: league.season
+                    )
+                }
+                app.logger.info("🔔 Started notification polling for \(notificationLeagues.count) league(s)")
+            }
+        } catch {
+            app.logger.warning("⚠️ Failed to load notification subscriptions at startup: \(error)")
+        }
+
         // Create FixtureRepository with database connection
         let db: any Database = app.db
         let fixtureRepository = FixtureRepository(db: db, logger: app.logger)
