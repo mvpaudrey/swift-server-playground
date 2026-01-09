@@ -51,6 +51,9 @@ public final class FixtureEntity: Model, Content, @unchecked Sendable {
 
     @OptionalField(key: "status_elapsed")
     var statusElapsed: Int?
+    
+    @OptionalField(key: "status_extra")
+    var statusExtra: Int?
 
     // Home Team
     @Field(key: "home_team_id")
@@ -97,6 +100,18 @@ public final class FixtureEntity: Model, Content, @unchecked Sendable {
 
     @OptionalField(key: "fulltime_away")
     var fulltimeAway: Int?
+    
+    @OptionalField(key: "extratime_home")
+    var extratimeHome: Int?
+    
+    @OptionalField(key: "extratime_away")
+    var extratimeAway: Int?
+    
+    @OptionalField(key: "penalty_home")
+    var penaltyHome: Int?
+    
+    @OptionalField(key: "penalty_away")
+    var penaltyAway: Int?
 
     // Periods
     @OptionalField(key: "period_first")
@@ -132,6 +147,7 @@ public final class FixtureEntity: Model, Content, @unchecked Sendable {
         statusLong: String,
         statusShort: String,
         statusElapsed: Int?,
+        statusExtra: Int?,
         homeTeamId: Int,
         homeTeamName: String,
         homeTeamLogo: String?,
@@ -146,6 +162,10 @@ public final class FixtureEntity: Model, Content, @unchecked Sendable {
         halftimeAway: Int?,
         fulltimeHome: Int?,
         fulltimeAway: Int?,
+        extratimeHome: Int?,
+        extratimeAway: Int?,
+        penaltyHome: Int?,
+        penaltyAway: Int?,
         periodFirst: Int?,
         periodSecond: Int?,
         competition: String
@@ -164,6 +184,7 @@ public final class FixtureEntity: Model, Content, @unchecked Sendable {
         self.statusLong = statusLong
         self.statusShort = statusShort
         self.statusElapsed = statusElapsed
+        self.statusExtra = statusExtra
         self.homeTeamId = homeTeamId
         self.homeTeamName = homeTeamName
         self.homeTeamLogo = homeTeamLogo
@@ -178,6 +199,10 @@ public final class FixtureEntity: Model, Content, @unchecked Sendable {
         self.halftimeAway = halftimeAway
         self.fulltimeHome = fulltimeHome
         self.fulltimeAway = fulltimeAway
+        self.extratimeHome = extratimeHome
+        self.extratimeAway = extratimeAway
+        self.penaltyHome = penaltyHome
+        self.penaltyAway = penaltyAway
         self.periodFirst = periodFirst
         self.periodSecond = periodSecond
         self.competition = competition
@@ -202,6 +227,7 @@ struct CreateFixtureEntity: AsyncMigration {
             .field("status_long", .string, .required)
             .field("status_short", .string, .required)
             .field("status_elapsed", .int)
+            .field("status_extra", .int)
             .field("home_team_id", .int, .required)
             .field("home_team_name", .string, .required)
             .field("home_team_logo", .string)
@@ -216,6 +242,10 @@ struct CreateFixtureEntity: AsyncMigration {
             .field("halftime_away", .int)
             .field("fulltime_home", .int)
             .field("fulltime_away", .int)
+            .field("extratime_home", .int)
+            .field("extratime_away", .int)
+            .field("penalty_home", .int)
+            .field("penalty_away", .int)
             .field("period_first", .int)
             .field("period_second", .int)
             .field("competition", .string, .required)
@@ -227,5 +257,27 @@ struct CreateFixtureEntity: AsyncMigration {
 
     func revert(on database: any Database) async throws {
         try await database.schema(FixtureEntity.schema).delete()
+    }
+}
+
+struct AddFixtureScoreExtras: AsyncMigration {
+    func prepare(on database: any Database) async throws {
+        try await database.schema(FixtureEntity.schema)
+            .field("status_extra", .int)
+            .field("extratime_home", .int)
+            .field("extratime_away", .int)
+            .field("penalty_home", .int)
+            .field("penalty_away", .int)
+            .update()
+    }
+
+    func revert(on database: any Database) async throws {
+        try await database.schema(FixtureEntity.schema)
+            .deleteField("status_extra")
+            .deleteField("extratime_home")
+            .deleteField("extratime_away")
+            .deleteField("penalty_home")
+            .deleteField("penalty_away")
+            .update()
     }
 }

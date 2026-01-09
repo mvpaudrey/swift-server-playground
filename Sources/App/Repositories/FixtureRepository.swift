@@ -25,12 +25,17 @@ public final class FixtureRepository: @unchecked Sendable {
             existing.statusLong = fixtureData.fixture.status.long
             existing.statusShort = fixtureData.fixture.status.short
             existing.statusElapsed = fixtureData.fixture.status.elapsed
+            existing.statusExtra = fixtureData.fixture.status.extra
             existing.homeGoals = fixtureData.goals.home
             existing.awayGoals = fixtureData.goals.away
             existing.halftimeHome = fixtureData.score.halftime.home
             existing.halftimeAway = fixtureData.score.halftime.away
             existing.fulltimeHome = fixtureData.score.fulltime.home
             existing.fulltimeAway = fixtureData.score.fulltime.away
+            existing.extratimeHome = fixtureData.score.extratime.home
+            existing.extratimeAway = fixtureData.score.extratime.away
+            existing.penaltyHome = fixtureData.score.penalty.home
+            existing.penaltyAway = fixtureData.score.penalty.away
             existing.homeTeamWinner = fixtureData.teams.home.winner
             existing.awayTeamWinner = fixtureData.teams.away.winner
             try await existing.save(on: db)
@@ -50,6 +55,7 @@ public final class FixtureRepository: @unchecked Sendable {
                 statusLong: fixtureData.fixture.status.long,
                 statusShort: fixtureData.fixture.status.short,
                 statusElapsed: fixtureData.fixture.status.elapsed,
+                statusExtra: fixtureData.fixture.status.extra,
                 homeTeamId: fixtureData.teams.home.id,
                 homeTeamName: fixtureData.teams.home.name,
                 homeTeamLogo: fixtureData.teams.home.logo,
@@ -64,6 +70,10 @@ public final class FixtureRepository: @unchecked Sendable {
                 halftimeAway: fixtureData.score.halftime.away,
                 fulltimeHome: fixtureData.score.fulltime.home,
                 fulltimeAway: fixtureData.score.fulltime.away,
+                extratimeHome: fixtureData.score.extratime.home,
+                extratimeAway: fixtureData.score.extratime.away,
+                penaltyHome: fixtureData.score.penalty.home,
+                penaltyAway: fixtureData.score.penalty.away,
                 periodFirst: fixtureData.fixture.periods.first,
                 periodSecond: fixtureData.fixture.periods.second,
                 competition: competition

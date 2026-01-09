@@ -1317,6 +1317,7 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
         status.long = data.fixture.status.long
         status.short = data.fixture.status.short
         status.elapsed = Int32(data.fixture.status.elapsed ?? 0)
+        status.extra = Int32(data.fixture.status.extra ?? 0)
         fixture.status = status
 
         var teams = Afcon_FixtureTeams()
@@ -1351,6 +1352,16 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
         fulltime.away = Int32(data.score.fulltime.away ?? 0)
         score.fulltime = fulltime
 
+        var extratime = Afcon_ScoreDetail()
+        extratime.home = Int32(data.score.extratime.home ?? 0)
+        extratime.away = Int32(data.score.extratime.away ?? 0)
+        score.extratime = extratime
+
+        var penalty = Afcon_ScoreDetail()
+        penalty.home = Int32(data.score.penalty.home ?? 0)
+        penalty.away = Int32(data.score.penalty.away ?? 0)
+        score.penalty = penalty
+
         fixture.score = score
 
         return fixture
@@ -1379,6 +1390,7 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
         status.long = entity.statusLong
         status.short = entity.statusShort
         status.elapsed = Int32(entity.statusElapsed ?? 0)
+        status.extra = Int32(entity.statusExtra ?? 0)
         fixture.status = status
 
         var teams = Afcon_FixtureTeams()
@@ -1412,6 +1424,16 @@ public final class AFCONServiceProvider: Afcon_AFCONService.ServiceProtocol, @un
         fulltime.home = Int32(entity.fulltimeHome ?? 0)
         fulltime.away = Int32(entity.fulltimeAway ?? 0)
         score.fulltime = fulltime
+
+        var extratime = Afcon_ScoreDetail()
+        extratime.home = Int32(entity.extratimeHome ?? 0)
+        extratime.away = Int32(entity.extratimeAway ?? 0)
+        score.extratime = extratime
+
+        var penalty = Afcon_ScoreDetail()
+        penalty.home = Int32(entity.penaltyHome ?? 0)
+        penalty.away = Int32(entity.penaltyAway ?? 0)
+        score.penalty = penalty
 
         fixture.score = score
 

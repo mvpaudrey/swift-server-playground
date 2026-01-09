@@ -92,6 +92,7 @@ public func configure(_ app: Application) async throws {
     // Migrations
     app.migrations.add(CreateLeagueEntity())
     app.migrations.add(CreateFixtureEntity())
+    app.migrations.add(AddFixtureScoreExtras())
     app.migrations.add(CreateDeviceRegistrationEntity())
     app.migrations.add(CreateNotificationSubscriptionEntity())
     app.migrations.add(CreateNotificationHistoryEntity())
