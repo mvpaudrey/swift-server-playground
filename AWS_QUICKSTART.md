@@ -25,7 +25,7 @@ aws configure
 # You'll be prompted for:
 # AWS Access Key ID: [Enter your access key]
 # AWS Secret Access Key: [Enter your secret key]
-# Default region name: us-east-1
+# Default region name: eu-north-1
 # Default output format: json
 
 # Verify configuration
@@ -51,7 +51,7 @@ aws secretsmanager create-secret \
   --name production-afcon-api-football-key \
   --description "API-Football API key for AFCON server" \
   --secret-string '{"api_key":"YOUR_API_FOOTBALL_KEY_HERE"}' \
-  --region us-east-1
+  --region eu-north-1
 
 # If you have APNS credentials (iOS push notifications)
 aws secretsmanager create-secret \
@@ -62,19 +62,19 @@ aws secretsmanager create-secret \
     "team_id":"YOUR_APPLE_TEAM_ID",
     "topic":"com.yourapp.bundleid"
   }' \
-  --region us-east-1
+  --region eu-north-1
 
 # If you have FCM credentials (Android push notifications)
 aws secretsmanager create-secret \
   --name production-afcon-fcm \
   --description "Firebase Cloud Messaging credentials" \
   --secret-string '{"server_key":"YOUR_FCM_SERVER_KEY"}' \
-  --region us-east-1
+  --region eu-north-1
 ```
 
 **Verify secrets:**
 ```bash
-aws secretsmanager list-secrets --region us-east-1
+aws secretsmanager list-secrets --region eu-north-1
 ```
 
 ---
@@ -94,18 +94,18 @@ aws cloudformation create-stack \
     ParameterKey=CacheNodeType,ParameterValue=cache.t4g.micro \
     ParameterKey=DesiredCount,ParameterValue=2 \
   --capabilities CAPABILITY_IAM \
-  --region us-east-1
+  --region eu-north-1
 
 # Monitor deployment progress
 aws cloudformation describe-stacks \
   --stack-name afcon-production \
   --query 'Stacks[0].StackStatus' \
-  --region us-east-1
+  --region eu-north-1
 
 # Wait for completion (takes ~15-20 minutes)
 aws cloudformation wait stack-create-complete \
   --stack-name afcon-production \
-  --region us-east-1
+  --region eu-north-1
 ```
 
 ### Option B: Deploy Minimal Stack (Development/Testing)
@@ -122,7 +122,7 @@ aws cloudformation create-stack \
     ParameterKey=CacheNodeType,ParameterValue=cache.t4g.micro \
     ParameterKey=DesiredCount,ParameterValue=1 \
   --capabilities CAPABILITY_IAM \
-  --region us-east-1
+  --region eu-north-1
 ```
 
 **Monitor progress:**
@@ -143,9 +143,9 @@ watch -n 5 'aws cloudformation describe-stack-events \
 
 ```bash
 # Get ECR login
-aws ecr get-login-password --region us-east-1 | \
+aws ecr get-login-password --region eu-north-1 | \
   docker login --username AWS --password-stdin \
-  $(aws sts get-caller-identity --query Account --output text).dkr.ecr.us-east-1.amazonaws.com
+  $(aws sts get-caller-identity --query Account --output text).dkr.ecr.eu-north-1.amazonaws.com
 
 # Get repository URI
 ECR_REPO=$(aws cloudformation describe-stacks \
@@ -224,20 +224,20 @@ aws ecs update-service \
   --cluster production-afcon-cluster \
   --service afcon-service \
   --force-new-deployment \
-  --region us-east-1
+  --region eu-north-1
 
 # Monitor deployment
 aws ecs describe-services \
   --cluster production-afcon-cluster \
   --services afcon-service \
   --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Deployments:deployments[0].status}' \
-  --region us-east-1
+  --region eu-north-1
 
 # Wait for service to stabilize
 aws ecs wait services-stable \
   --cluster production-afcon-cluster \
   --services afcon-service \
-  --region us-east-1
+  --region eu-north-1
 ```
 
 ---
@@ -301,7 +301,7 @@ grpcurl -plaintext \
 # View container logs
 aws logs tail /ecs/production-afcon-server \
   --follow \
-  --region us-east-1
+  --region eu-north-1
 ```
 
 ---
@@ -314,7 +314,7 @@ aws logs tail /ecs/production-afcon-server \
 # Check CloudFormation events
 aws cloudformation describe-stack-events \
   --stack-name afcon-production \
-  --region us-east-1 \
+  --region eu-north-1 \
   --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`].[LogicalResourceId,ResourceStatusReason]' \
   --output table
 ```
@@ -326,7 +326,7 @@ aws cloudformation describe-stack-events \
 aws ecs describe-tasks \
   --cluster production-afcon-cluster \
   --tasks $(aws ecs list-tasks --cluster production-afcon-cluster --query 'taskArns[0]' --output text) \
-  --region us-east-1
+  --region eu-north-1
 ```
 
 ### Database Connection Issues
@@ -336,13 +336,13 @@ aws ecs describe-tasks \
 aws rds describe-db-instances \
   --db-instance-identifier production-afcon-db \
   --query 'DBInstances[0].{Endpoint:Endpoint.Address,Status:DBInstanceStatus}' \
-  --region us-east-1
+  --region eu-north-1
 
 # Check security group rules
 aws ec2 describe-security-groups \
   --filters "Name=tag:Name,Values=production-afcon-db-sg" \
   --query 'SecurityGroups[0].IpPermissions' \
-  --region us-east-1
+  --region eu-north-1
 ```
 
 ---
@@ -375,18 +375,18 @@ aws ec2 describe-security-groups \
 # Delete CloudFormation stack (this removes all resources)
 aws cloudformation delete-stack \
   --stack-name afcon-production \
-  --region us-east-1
+  --region eu-north-1
 
 # Delete secrets
 aws secretsmanager delete-secret \
   --secret-id production-afcon-api-football-key \
   --force-delete-without-recovery \
-  --region us-east-1
+  --region eu-north-1
 
 # Verify deletion
 aws cloudformation describe-stacks \
   --stack-name afcon-production \
-  --region us-east-1
+  --region eu-north-1
 ```
 
 ---
