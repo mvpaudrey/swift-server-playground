@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Swift
         uses: swift-actions/setup-swift@v2
@@ -42,7 +42,7 @@ jobs:
           swift-version: '6.0'
 
       - name: Cache Swift packages
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: .build
           key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
@@ -72,18 +72,18 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
+      image-uri: ${{ steps.image.outputs.uri }}
       image-digest: ${{ steps.build.outputs.digest }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -91,7 +91,7 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Determine environment
         id: env
@@ -108,7 +108,7 @@ jobs:
 
       - name: Extract metadata for Docker
         id: meta
-        uses: docker/metadata-action@v4
+        uses: docker/metadata-action@v5
         with:
           images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
           tags: |
@@ -122,7 +122,7 @@ jobs:
 
       - name: Build and push Docker image
         id: build
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
@@ -133,6 +133,11 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             ENVIRONMENT=${{ steps.env.outputs.environment }}
+
+      - name: Set image URI
+        id: image
+        run: |
+          echo "uri=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
 
       - name: Image digest
         run: echo ${{ steps.build.outputs.digest }}
@@ -147,18 +152,38 @@ jobs:
     if: (github.ref == 'refs/heads/develop' || github.event.inputs.environment == 'staging') && github.event_name != 'pull_request'
     environment:
       name: staging
-      url: http://${{ steps.deploy.outputs.alb-dns }}
+      url: http://${{ steps.stack.outputs.alb-dns }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve stack outputs
+        id: stack
+        run: |
+          STACK_NAME="afcon-staging"
+          CLUSTER=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue" \
+            --output text)
+          SERVICE=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
+            --output text)
+          ALB_DNS=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
+            --output text)
+          echo "cluster=$CLUSTER" >> $GITHUB_OUTPUT
+          echo "service=$SERVICE" >> $GITHUB_OUTPUT
+          echo "alb-dns=$ALB_DNS" >> $GITHUB_OUTPUT
 
       - name: Update ECS task definition
         id: task-def
@@ -168,35 +193,26 @@ jobs:
             --query taskDefinition)
 
           NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
-            --arg IMAGE "${{ needs.build-docker.outputs.image-tag }}" \
+            --arg IMAGE "${{ needs.build-docker.outputs.image-uri }}" \
             '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
 
           echo $NEW_TASK_DEF > task-definition.json
 
       - name: Deploy to Amazon ECS
         id: deploy
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: task-definition.json
-          service: afcon-service
-          cluster: staging-afcon-cluster
+          service: ${{ steps.stack.outputs.service }}
+          cluster: ${{ steps.stack.outputs.cluster }}
           wait-for-service-stability: true
           wait-for-minutes: 10
-
-      - name: Get ALB DNS
-        id: alb-dns
-        run: |
-          ALB_DNS=$(aws elbv2 describe-load-balancers \
-            --names staging-afcon-alb \
-            --query 'LoadBalancers[0].DNSName' \
-            --output text)
-          echo "alb-dns=$ALB_DNS" >> $GITHUB_OUTPUT
 
       - name: Verify deployment
         run: |
           echo "Waiting for service to be stable..."
           sleep 30
-          curl -f http://${{ steps.alb-dns.outputs.alb-dns }}/health || exit 1
+          curl -f http://${{ steps.stack.outputs.alb-dns }}/health || exit 1
 
   # ============================================================================
   # Deploy to ECS (Production)
@@ -208,18 +224,38 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment:
       name: production
-      url: https://${{ steps.deploy.outputs.alb-dns }}
+      url: https://${{ steps.stack.outputs.alb-dns }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve stack outputs
+        id: stack
+        run: |
+          STACK_NAME="afcon-production"
+          CLUSTER=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue" \
+            --output text)
+          SERVICE=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
+            --output text)
+          ALB_DNS=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
+            --output text)
+          echo "cluster=$CLUSTER" >> $GITHUB_OUTPUT
+          echo "service=$SERVICE" >> $GITHUB_OUTPUT
+          echo "alb-dns=$ALB_DNS" >> $GITHUB_OUTPUT
 
       - name: Update ECS task definition
         id: task-def
@@ -229,35 +265,26 @@ jobs:
             --query taskDefinition)
 
           NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
-            --arg IMAGE "${{ needs.build-docker.outputs.image-tag }}" \
+            --arg IMAGE "${{ needs.build-docker.outputs.image-uri }}" \
             '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
 
           echo $NEW_TASK_DEF > task-definition.json
 
       - name: Deploy to Amazon ECS
         id: deploy
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: task-definition.json
-          service: afcon-service
-          cluster: production-afcon-cluster
+          service: ${{ steps.stack.outputs.service }}
+          cluster: ${{ steps.stack.outputs.cluster }}
           wait-for-service-stability: true
           wait-for-minutes: 15
-
-      - name: Get ALB DNS
-        id: alb-dns
-        run: |
-          ALB_DNS=$(aws elbv2 describe-load-balancers \
-            --names production-afcon-alb \
-            --query 'LoadBalancers[0].DNSName' \
-            --output text)
-          echo "alb-dns=$ALB_DNS" >> $GITHUB_OUTPUT
 
       - name: Verify deployment
         run: |
           echo "Waiting for service to be stable..."
           sleep 30
-          curl -f https://${{ steps.alb-dns.outputs.alb-dns }}/health || exit 1
+          curl -f https://${{ steps.stack.outputs.alb-dns }}/health || exit 1
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/')
@@ -282,16 +309,31 @@ jobs:
 
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Resolve stack outputs
+        id: stack
+        run: |
+          STACK_NAME="afcon-${{ github.event.inputs.environment }}"
+          CLUSTER=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue" \
+            --output text)
+          SERVICE=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
+            --output text)
+          echo "cluster=$CLUSTER" >> $GITHUB_OUTPUT
+          echo "service=$SERVICE" >> $GITHUB_OUTPUT
+
       - name: Rollback ECS service
         run: |
-          CLUSTER="${{ github.event.inputs.environment }}-afcon-cluster"
-          SERVICE="afcon-service"
+          CLUSTER="${{ steps.stack.outputs.cluster }}"
+          SERVICE="${{ steps.stack.outputs.service }}"
 
           # Get previous task definition
           CURRENT_TASK_DEF=$(aws ecs describe-services \
@@ -317,8 +359,8 @@ jobs:
 
       - name: Wait for rollback to complete
         run: |
-          CLUSTER="${{ github.event.inputs.environment }}-afcon-cluster"
-          SERVICE="afcon-service"
+          CLUSTER="${{ steps.stack.outputs.cluster }}"
+          SERVICE="${{ steps.stack.outputs.service }}"
           aws ecs wait services-stable --cluster $CLUSTER --services $SERVICE
 
   # ============================================================================
@@ -342,9 +384,23 @@ jobs:
             exit 1
           fi
 
-      # Add Slack/Discord/Email notifications here if needed
-      # - name: Slack Notification
-      #   uses: 8398a7/action-slack@v3
-      #   with:
-      #     status: ${{ job.status }}
-      #     webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+      - name: Slack notification
+        if: ${{ always() && secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": "AFCON deploy: ${{ needs.deploy-production.result == 'success' && 'production' || needs.deploy-staging.result == 'success' && 'staging' || 'failed' }}",
+              "attachments": [
+                {
+                  "color": "${{ needs.deploy-production.result == 'success' && 'good' || needs.deploy-staging.result == 'success' && 'good' || 'danger' }}",
+                  "fields": [
+                    { "title": "Repo", "value": "${{ github.repository }}", "short": true },
+                    { "title": "Ref", "value": "${{ github.ref_name }}", "short": true },
+                    { "title": "Run", "value": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}", "short": false }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
