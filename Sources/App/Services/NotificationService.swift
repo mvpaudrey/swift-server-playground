@@ -20,6 +20,73 @@ struct MatchContentState: Codable {
 struct EmptyContentState: Codable {}
 @preconcurrency import APNSCore
 
+// MARK: - Team Flag Mapping
+
+/// Mapping of AFCON team names to their country flag emojis
+private let teamFlags: [String: String] = [
+    "Algeria": "🇩🇿",
+    "Angola": "🇦🇴",
+    "Benin": "🇧🇯",
+    "Botswana": "🇧🇼",
+    "Burkina Faso": "🇧🇫",
+    "Burundi": "🇧🇮",
+    "Cameroon": "🇨🇲",
+    "Cape Verde": "🇨🇻",
+    "Central African Republic": "🇨🇫",
+    "Chad": "🇹🇩",
+    "Comoros": "🇰🇲",
+    "Congo": "🇨🇬",
+    "DR Congo": "🇨🇩",
+    "Ivory Coast": "🇨🇮",
+    "Djibouti": "🇩🇯",
+    "Egypt": "🇪🇬",
+    "Equatorial Guinea": "🇬🇶",
+    "Eritrea": "🇪🇷",
+    "Ethiopia": "🇪🇹",
+    "Gabon": "🇬🇦",
+    "Gambia": "🇬🇲",
+    "Ghana": "🇬🇭",
+    "Guinea": "🇬🇳",
+    "Guinea-Bissau": "🇬🇼",
+    "Kenya": "🇰🇪",
+    "Lesotho": "🇱🇸",
+    "Liberia": "🇱🇷",
+    "Libya": "🇱🇾",
+    "Madagascar": "🇲🇬",
+    "Malawi": "🇲🇼",
+    "Mali": "🇲🇱",
+    "Mauritania": "🇲🇷",
+    "Mauritius": "🇲🇺",
+    "Morocco": "🇲🇦",
+    "Mozambique": "🇲🇿",
+    "Namibia": "🇳🇦",
+    "Niger": "🇳🇪",
+    "Nigeria": "🇳🇬",
+    "Rwanda": "🇷🇼",
+    "Sao Tome and Principe": "🇸🇹",
+    "Senegal": "🇸🇳",
+    "Seychelles": "🇸🇨",
+    "Sierra Leone": "🇸🇱",
+    "Somalia": "🇸🇴",
+    "South Africa": "🇿🇦",
+    "South Sudan": "🇸🇸",
+    "Sudan": "🇸🇩",
+    "Tanzania": "🇹🇿",
+    "Togo": "🇹🇬",
+    "Tunisia": "🇹🇳",
+    "Uganda": "🇺🇬",
+    "Zambia": "🇿🇲",
+    "Zimbabwe": "🇿🇼"
+]
+
+/// Helper function to add flag emoji to team name
+private func teamWithFlag(_ teamName: String) -> String {
+    if let flag = teamFlags[teamName] {
+        return "\(flag) \(teamName)"
+    }
+    return teamName
+}
+
 /// Actor-based notification service with APNSwift v5+ for Swift 6 compliance
 /// Handles push notifications (iOS/Android) and Live Activity updates
 public actor NotificationService {
@@ -186,7 +253,7 @@ public actor NotificationService {
         // Create notification payload
         let title = "⚽ GOAL!"
         let assistText = assist.map { " (assist: \($0))" } ?? ""
-        let body = "\(scorer) scores!\(assistText)\n\(homeTeam) \(homeGoals)-\(awayGoals) \(awayTeam) (\(minute)')"
+        let body = "\(scorer) scores!\(assistText)\n\(teamWithFlag(homeTeam)) \(homeGoals)-\(awayGoals) \(teamWithFlag(awayTeam)) (\(minute)')"
 
         // Send to iOS devices
         let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
@@ -269,7 +336,7 @@ public actor NotificationService {
 
         // Create notification payload
         let title = "🟥 RED CARD!"
-        let body = "\(playerName) (\(teamName)) sent off! \(homeTeam) vs \(awayTeam) (\(minute)')"
+        let body = "\(playerName) (\(teamWithFlag(teamName))) sent off!\n\(teamWithFlag(homeTeam)) vs \(teamWithFlag(awayTeam)) (\(minute)')"
 
         // Send to iOS devices
         let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
