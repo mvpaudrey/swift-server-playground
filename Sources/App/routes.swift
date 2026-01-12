@@ -426,14 +426,23 @@ public func routes(_ app: Application) throws {
 
     // MARK: - Test/Admin Endpoints
 
+    struct UpdateDateRequest: Content {
+        let minutesFromNow: Int
+    }
+
+    struct UpdateDateResponse: Content {
+        let success: Bool
+        let fixtureId: Int
+        let homeTeam: String
+        let awayTeam: String
+        let newDate: String
+        let minutesFromNow: Int
+    }
+
     // Update fixture date for testing (admin only)
-    api.post("test", "fixture", ":id", "update-date") { req async throws -> [String: Any] in
+    api.post("test", "fixture", ":id", "update-date") { req async throws -> UpdateDateResponse in
         guard let fixtureId = req.parameters.get("id", as: Int.self) else {
             throw Abort(.badRequest, reason: "Invalid fixture ID")
-        }
-
-        struct UpdateDateRequest: Content {
-            let minutesFromNow: Int
         }
 
         let updateRequest = try req.content.decode(UpdateDateRequest.self)
@@ -453,14 +462,14 @@ public func routes(_ app: Application) throws {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
-        return [
-            "success": true,
-            "fixtureId": fixtureId,
-            "homeTeam": fixture.homeTeamName,
-            "awayTeam": fixture.awayTeamName,
-            "newDate": formatter.string(from: newDate),
-            "minutesFromNow": updateRequest.minutesFromNow
-        ]
+        return UpdateDateResponse(
+            success: true,
+            fixtureId: fixtureId,
+            homeTeam: fixture.homeTeamName,
+            awayTeam: fixture.awayTeamName,
+            newDate: formatter.string(from: newDate),
+            minutesFromNow: updateRequest.minutesFromNow
+        )
     }
 
     app.logger.info("✅ HTTP routes configured")

@@ -26,12 +26,14 @@ brew install swift
 brew install protobuf  # For gRPC code generation
 brew install docker
 brew install awscli
+brew install jq
 
 # Verify installations
 swift --version    # Should be 5.9+
 protoc --version   # Should be 3.x+
 docker --version
 aws --version
+jq --version
 ```
 
 ### AWS Account Setup
@@ -43,7 +45,7 @@ aws --version
    aws configure
    # Enter your AWS Access Key ID
    # Enter your AWS Secret Access Key
-   # Default region: us-east-1
+  # Default region: eu-north-1
    # Default output format: json
    ```
 
@@ -132,112 +134,73 @@ grpcurl -plaintext localhost:50051 afcon.AFCONService/GetLeague
 
 ## AWS Deployment
 
-### Step 1: Prepare AWS Infrastructure
+### Step 1: Deploy AWS Infrastructure (CloudFormation + Scripts)
 
-#### Option A: Using CloudFormation (Recommended)
+Use the maintained deployment script in `infrastructure/`:
 
 ```bash
-# Deploy the complete infrastructure
-aws cloudformation create-stack \
-  --stack-name afcon-production \
-  --template-body file://infrastructure/cloudformation.yaml \
-  --parameters \
-    ParameterKey=EnvironmentName,ParameterValue=production \
-    ParameterKey=DBInstanceClass,ParameterValue=db.t4g.small \
-    ParameterKey=DesiredCount,ParameterValue=2 \
-  --capabilities CAPABILITY_IAM \
-  --region us-east-1
+# Deploy or update production
+./infrastructure/deploy.sh production
 
-# Monitor stack creation
-aws cloudformation describe-stacks \
-  --stack-name afcon-production \
-  --query 'Stacks[0].StackStatus'
-
-# Wait for completion (takes ~15-20 minutes)
-aws cloudformation wait stack-create-complete \
-  --stack-name afcon-production
+# Or deploy staging/development
+./infrastructure/deploy.sh staging
+./infrastructure/deploy.sh development
 ```
 
-#### Option B: Manual Setup
+This creates or updates the full stack (VPC, RDS, Redis, ECS, ALB/NLB, ECR, IAM, CloudWatch).
 
-If you prefer manual setup, create:
-1. VPC with public/private subnets
-2. RDS PostgreSQL database
-3. ElastiCache Redis cluster
-4. ECS Cluster with Fargate
-5. Application Load Balancer
-6. ECR Repository
-7. IAM roles and security groups
+### Step 2: Configure Secrets (Secrets Manager)
 
-### Step 2: Configure Secrets
+You can update secrets interactively:
 
 ```bash
-# Set API-Football key
-aws secretsmanager put-secret-value \
+./infrastructure/update-secrets.sh production
+```
+
+Or update them manually:
+
+```bash
+# API-Football key
+aws secretsmanager update-secret \
   --secret-id production-afcon-api-football-key \
   --secret-string '{"api_key":"YOUR_API_KEY_HERE"}'
 
-# Set APNS credentials (iOS push notifications)
-aws secretsmanager put-secret-value \
+# APNS credentials (key is the raw .p8 contents)
+aws secretsmanager update-secret \
   --secret-id production-afcon-apns \
-  --secret-string '{
-    "key_id":"YOUR_APNS_KEY_ID",
-    "team_id":"YOUR_TEAM_ID",
-    "topic":"com.yourapp.bundleid"
-  }'
+  --secret-string '{"key_id":"YOUR_APNS_KEY_ID","team_id":"YOUR_TEAM_ID","topic":"com.yourapp.bundleid","key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"}'
 
-# Set FCM credentials (Android push notifications)
-aws secretsmanager put-secret-value \
+# FCM credentials
+aws secretsmanager update-secret \
   --secret-id production-afcon-fcm \
   --secret-string '{"server_key":"YOUR_FCM_SERVER_KEY"}'
 ```
 
-### Step 3: Build and Push Docker Image
+### Step 3: Set Up GitHub Actions (Recommended CI/CD)
 
 ```bash
-# Get ECR login credentials
-aws ecr get-login-password --region us-east-1 | \
-  docker login --username AWS --password-stdin \
-  ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
-
-# Build Docker image
-docker build -t afcon-server:latest .
-
-# Tag for ECR
-docker tag afcon-server:latest \
-  ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/afcon-server:latest
-
-# Push to ECR
-docker push ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/afcon-server:latest
+./infrastructure/setup-github-actions.sh
 ```
 
-### Step 4: Deploy to ECS
+Add the generated keys to GitHub repo secrets:
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
 
-```bash
-# Force new deployment
-aws ecs update-service \
-  --cluster production-afcon-cluster \
-  --service afcon-service \
-  --force-new-deployment \
-  --region us-east-1
+### Step 4: Build + Deploy
 
-# Monitor deployment
-aws ecs wait services-stable \
-  --cluster production-afcon-cluster \
-  --services afcon-service \
-  --region us-east-1
-```
+Deploy via GitHub Actions:
+
+- Push to `main` → production deploy
+- Push to `develop` → staging deploy
+- Or trigger manually in Actions → "Deploy to AWS ECS"
 
 ### Step 5: Get Endpoints
 
 ```bash
-# Get ALB DNS name
 aws cloudformation describe-stacks \
   --stack-name afcon-production \
-  --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerDNS`].OutputValue' \
-  --output text
-
-# Example output: afcon-alb-123456789.us-east-1.elb.amazonaws.com
+  --query 'Stacks[0].Outputs' \
+  --output table
 ```
 
 **Access your services:**
@@ -259,28 +222,9 @@ aws cloudformation describe-stacks \
 4. Download the `.p8` file
 5. Note the Key ID and Team ID
 
-#### 2. Upload to AWS
+#### 2. Upload to AWS (Secrets Manager)
 
-```bash
-# Upload APNS key to S3 or mount as secret
-# Option 1: Store in Secrets Manager
-aws secretsmanager create-secret \
-  --name production-afcon-apns-key \
-  --secret-binary fileb://AuthKey_XXXXXXXXXX.p8
-
-# Option 2: Store in ECS task volume (recommended)
-# Copy .p8 file to secrets/ directory locally
-# Mount secrets volume in docker-compose.yml (already configured)
-```
-
-#### 3. Configure Environment
-
-Update CloudFormation stack or ECS task definition with:
-- `APNS_KEY_ID`: Your APNS Key ID
-- `APNS_TEAM_ID`: Your Apple Team ID
-- `APNS_TOPIC`: Your app's bundle identifier
-- `APNS_ENVIRONMENT`: `sandbox` or `production`
-- `APNS_KEY_PATH`: Path to .p8 file
+The ECS task reads APNS credentials from Secrets Manager. Update the `production-afcon-apns` secret with `key_id`, `team_id`, `topic`, and `key` (raw `.p8` contents).
 
 ### Android (FCM)
 
@@ -359,6 +303,25 @@ grpcurl -plaintext \
 # Trigger manual deployment via GitHub Actions UI
 # Go to Actions → Deploy to AWS ECS → Run workflow
 # Select environment: development/staging/production
+```
+
+### Rebuild/Force Redeploy (Without New Image)
+
+If you need to restart tasks with the same image:
+
+```bash
+CLUSTER=$(aws cloudformation describe-stacks \
+  --stack-name afcon-production \
+  --query 'Stacks[0].Outputs[?OutputKey==`ECSClusterName`].OutputValue' \
+  --output text)
+
+SERVICE=$(aws cloudformation describe-stacks \
+  --stack-name afcon-production \
+  --query 'Stacks[0].Outputs[?OutputKey==`ECSServiceName`].OutputValue' \
+  --output text)
+
+aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --force-new-deployment
+aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
 ```
 
 ---
