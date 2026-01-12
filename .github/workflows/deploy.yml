@@ -385,7 +385,7 @@ jobs:
           fi
 
       - name: Slack notification
-        if: ${{ always() && secrets.SLACK_WEBHOOK_URL != '' }}
+        if: ${{ always() && env.SLACK_WEBHOOK_URL != '' }}
         uses: slackapi/slack-github-action@v1.25.0
         with:
           payload: |
