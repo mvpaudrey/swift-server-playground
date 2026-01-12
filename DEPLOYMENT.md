@@ -476,7 +476,7 @@ aws ecs update-service \
 
 ---
 
-## Cost Optimization
+## Cost Optimization (estimation)
 
 ### Estimated Monthly Costs (Medium Scale: 1K-50K users)
 
