@@ -186,7 +186,7 @@ public actor NotificationService {
         // Create notification payload
         let title = "⚽ GOAL!"
         let assistText = assist.map { " (assist: \($0))" } ?? ""
-        let body = "\(scorer) scores!\(assistText) \(homeTeam) \(homeGoals)-\(awayGoals) \(awayTeam) (\(minute)')"
+        let body = "\(scorer) scores!\(assistText)\n\(homeTeam) \(homeGoals)-\(awayGoals) \(awayTeam) (\(minute)')"
 
         // Send to iOS devices
         let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
