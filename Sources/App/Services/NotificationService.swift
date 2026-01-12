@@ -20,76 +20,76 @@ struct MatchContentState: Codable {
 struct EmptyContentState: Codable {}
 @preconcurrency import APNSCore
 
-// MARK: - Team Flag Mapping
-
-/// Mapping of AFCON team names to their country flag emojis
-private let teamFlags: [String: String] = [
-    "Algeria": "🇩🇿",
-    "Angola": "🇦🇴",
-    "Benin": "🇧🇯",
-    "Botswana": "🇧🇼",
-    "Burkina Faso": "🇧🇫",
-    "Burundi": "🇧🇮",
-    "Cameroon": "🇨🇲",
-    "Cape Verde": "🇨🇻",
-    "Central African Republic": "🇨🇫",
-    "Chad": "🇹🇩",
-    "Comoros": "🇰🇲",
-    "Congo": "🇨🇬",
-    "DR Congo": "🇨🇩",
-    "Ivory Coast": "🇨🇮",
-    "Djibouti": "🇩🇯",
-    "Egypt": "🇪🇬",
-    "Equatorial Guinea": "🇬🇶",
-    "Eritrea": "🇪🇷",
-    "Ethiopia": "🇪🇹",
-    "Gabon": "🇬🇦",
-    "Gambia": "🇬🇲",
-    "Ghana": "🇬🇭",
-    "Guinea": "🇬🇳",
-    "Guinea-Bissau": "🇬🇼",
-    "Kenya": "🇰🇪",
-    "Lesotho": "🇱🇸",
-    "Liberia": "🇱🇷",
-    "Libya": "🇱🇾",
-    "Madagascar": "🇲🇬",
-    "Malawi": "🇲🇼",
-    "Mali": "🇲🇱",
-    "Mauritania": "🇲🇷",
-    "Mauritius": "🇲🇺",
-    "Morocco": "🇲🇦",
-    "Mozambique": "🇲🇿",
-    "Namibia": "🇳🇦",
-    "Niger": "🇳🇪",
-    "Nigeria": "🇳🇬",
-    "Rwanda": "🇷🇼",
-    "Sao Tome and Principe": "🇸🇹",
-    "Senegal": "🇸🇳",
-    "Seychelles": "🇸🇨",
-    "Sierra Leone": "🇸🇱",
-    "Somalia": "🇸🇴",
-    "South Africa": "🇿🇦",
-    "South Sudan": "🇸🇸",
-    "Sudan": "🇸🇩",
-    "Tanzania": "🇹🇿",
-    "Togo": "🇹🇬",
-    "Tunisia": "🇹🇳",
-    "Uganda": "🇺🇬",
-    "Zambia": "🇿🇲",
-    "Zimbabwe": "🇿🇼"
-]
-
-/// Helper function to add flag emoji to team name
-private func teamWithFlag(_ teamName: String) -> String {
-    if let flag = teamFlags[teamName] {
-        return "\(flag) \(teamName)"
-    }
-    return teamName
-}
-
 /// Actor-based notification service with APNSwift v5+ for Swift 6 compliance
 /// Handles push notifications (iOS/Android) and Live Activity updates
 public actor NotificationService {
+
+    // MARK: - Team Flag Mapping
+
+    /// Mapping of AFCON team names to their country flag emojis
+    private static let teamFlags: [String: String] = [
+        "Algeria": "🇩🇿",
+        "Angola": "🇦🇴",
+        "Benin": "🇧🇯",
+        "Botswana": "🇧🇼",
+        "Burkina Faso": "🇧🇫",
+        "Burundi": "🇧🇮",
+        "Cameroon": "🇨🇲",
+        "Cape Verde": "🇨🇻",
+        "Central African Republic": "🇨🇫",
+        "Chad": "🇹🇩",
+        "Comoros": "🇰🇲",
+        "Congo": "🇨🇬",
+        "DR Congo": "🇨🇩",
+        "Ivory Coast": "🇨🇮",
+        "Djibouti": "🇩🇯",
+        "Egypt": "🇪🇬",
+        "Equatorial Guinea": "🇬🇶",
+        "Eritrea": "🇪🇷",
+        "Ethiopia": "🇪🇹",
+        "Gabon": "🇬🇦",
+        "Gambia": "🇬🇲",
+        "Ghana": "🇬🇭",
+        "Guinea": "🇬🇳",
+        "Guinea-Bissau": "🇬🇼",
+        "Kenya": "🇰🇪",
+        "Lesotho": "🇱🇸",
+        "Liberia": "🇱🇷",
+        "Libya": "🇱🇾",
+        "Madagascar": "🇲🇬",
+        "Malawi": "🇲🇼",
+        "Mali": "🇲🇱",
+        "Mauritania": "🇲🇷",
+        "Mauritius": "🇲🇺",
+        "Morocco": "🇲🇦",
+        "Mozambique": "🇲🇿",
+        "Namibia": "🇳🇦",
+        "Niger": "🇳🇪",
+        "Nigeria": "🇳🇬",
+        "Rwanda": "🇷🇼",
+        "Sao Tome and Principe": "🇸🇹",
+        "Senegal": "🇸🇳",
+        "Seychelles": "🇸🇨",
+        "Sierra Leone": "🇸🇱",
+        "Somalia": "🇸🇴",
+        "South Africa": "🇿🇦",
+        "South Sudan": "🇸🇸",
+        "Sudan": "🇸🇩",
+        "Tanzania": "🇹🇿",
+        "Togo": "🇹🇬",
+        "Tunisia": "🇹🇳",
+        "Uganda": "🇺🇬",
+        "Zambia": "🇿🇲",
+        "Zimbabwe": "🇿🇼"
+    ]
+
+    /// Helper function to add flag emoji to team name
+    private nonisolated func teamWithFlag(_ teamName: String) -> String {
+        if let flag = Self.teamFlags[teamName] {
+            return "\(flag) \(teamName)"
+        }
+        return teamName
+    }
     private let db: any Database
     private let logger: Logger
     private let deviceRepository: DeviceRepository
