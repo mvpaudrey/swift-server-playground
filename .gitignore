@@ -25,11 +25,6 @@ xcuserdata/
 .env
 .env.local
 
-# Generated Protocol Buffer code
-Sources/App/gRPC/Generated/*.swift
-Sources/App/gRPC/Generated/*.grpc.swift
-!Sources/App/gRPC/Generated/README.md
-
 # Logs
 *.log
 logs/
