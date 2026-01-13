@@ -270,7 +270,8 @@ public actor NotificationService {
                         "fixture_id": String(fixtureId),
                         "scorer": scorer,
                         "minute": String(minute)
-                    ]
+                    ],
+                    collapseId: "fixture-\(fixtureId)"
                 )
             } catch {
                 logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
@@ -354,7 +355,8 @@ public actor NotificationService {
                         "player": playerName,
                         "team": teamName,
                         "minute": String(minute)
-                    ]
+                    ],
+                    collapseId: "fixture-\(fixtureId)"
                 )
             } catch {
                 logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
@@ -575,7 +577,8 @@ public actor NotificationService {
         body: String,
         badge: Int? = nil,
         sound: String? = nil,
-        data: [String: String] = [:]
+        data: [String: String] = [:],
+        collapseId: String? = nil
     ) async throws {
         guard let config = apnsConfig else {
             throw NotificationError.apnsNotConfigured
@@ -583,7 +586,7 @@ public actor NotificationService {
 
         let client = try getAPNSClient()
 
-        let alert = APNSAlertNotification(
+        var alert = APNSAlertNotification(
             alert: .init(
                 title: .raw(title),
                 subtitle: nil,
@@ -593,15 +596,22 @@ public actor NotificationService {
             expiration: .immediately,
             priority: .immediately,
             topic: config.topic,
-            payload: data
+            payload: data,
+            apnsID: nil
         )
+
+        // Set collapse ID to replace previous notifications for the same match
+        alert.collapseID = collapseId
+
+        // Set thread ID for grouping notifications in notification center
+        alert.threadID = collapseId
 
         _ = try await client.sendAlertNotification(
             alert,
             deviceToken: deviceToken
         )
 
-        logger.debug("📱 APNs sent to \(deviceToken.prefix(10))...")
+        logger.debug("📱 APNs sent to \(deviceToken.prefix(10))...\(collapseId.map { " [collapseId: \($0)]" } ?? "")")
     }
 
     /// Send Firebase Cloud Message
