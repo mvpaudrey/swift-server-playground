@@ -426,6 +426,41 @@ public func routes(_ app: Application) throws {
 
     // MARK: - Test/Admin Endpoints
 
+    struct DeviceStats: Content {
+        let totalDevices: Int
+        let iosPlatform: Int
+        let androidPlatform: Int
+        let devicesLast7Days: Int
+        let devicesLast30Days: Int
+    }
+
+    // Get device registration statistics
+    api.get("admin", "devices", "stats") { req async throws -> DeviceStats in
+        let db = req.db
+
+        let totalDevices = try await DeviceRegistrationEntity.query(on: db).count()
+        let iosDevices = try await DeviceRegistrationEntity.query(on: db)
+            .filter(\.$platform == "ios").count()
+        let androidDevices = try await DeviceRegistrationEntity.query(on: db)
+            .filter(\.$platform == "android").count()
+
+        let sevenDaysAgo = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        let thirtyDaysAgo = Date().addingTimeInterval(-30 * 24 * 60 * 60)
+
+        let devicesLast7Days = try await DeviceRegistrationEntity.query(on: db)
+            .filter(\.$createdAt >= sevenDaysAgo).count()
+        let devicesLast30Days = try await DeviceRegistrationEntity.query(on: db)
+            .filter(\.$createdAt >= thirtyDaysAgo).count()
+
+        return DeviceStats(
+            totalDevices: totalDevices,
+            iosPlatform: iosDevices,
+            androidPlatform: androidDevices,
+            devicesLast7Days: devicesLast7Days,
+            devicesLast30Days: devicesLast30Days
+        )
+    }
+
     struct UpdateDateRequest: Content {
         let minutesFromNow: Int
     }
