@@ -385,6 +385,371 @@ public actor NotificationService {
         }
     }
 
+    // MARK: - Match Lifecycle Notifications
+
+    public func sendMatchStartNotification(
+        fixtureId: Int,
+        homeTeam: String,
+        awayTeam: String,
+        kickoffTime: Date,
+        leagueId: Int,
+        season: Int
+    ) async throws {
+        logger.info("⚽ Sending match start notification: \(homeTeam) vs \(awayTeam)")
+
+        // Find subscribed devices
+        let subscriptions = try await db.query(NotificationSubscriptionEntity.self)
+            .filter(\.$leagueId == leagueId)
+            .filter(\.$season == season)
+            .filter(\.$notifyMatchStart == true)
+            .with(\.$device)
+            .all()
+
+        logger.info("Found \(subscriptions.count) match start notification subscribers")
+
+        // Create notification payload
+        let title = "⚽ Kick-off!"
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let timeString = formatter.string(from: kickoffTime)
+        let body = "Match starting now\n\(teamWithFlag(homeTeam)) vs \(teamWithFlag(awayTeam)) (\(timeString))"
+
+        // Send to iOS devices
+        let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
+        for subscription in iosDevices {
+            do {
+                try await sendAPNs(
+                    deviceToken: subscription.device.deviceToken,
+                    title: title,
+                    body: body,
+                    badge: 1,
+                    sound: "default",
+                    data: [
+                        "type": "match_start",
+                        "fixture_id": String(fixtureId),
+                        "home_team": homeTeam,
+                        "away_team": awayTeam
+                    ],
+                    collapseId: "fixture-\(fixtureId)"
+                )
+            } catch {
+                logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+            }
+        }
+
+        // Send to Android devices
+        let androidDevices = subscriptions.filter { $0.device.platform == "android" }
+        for subscription in androidDevices {
+            do {
+                try await sendFCM(
+                    deviceToken: subscription.device.deviceToken,
+                    title: title,
+                    body: body,
+                    data: [
+                        "type": "match_start",
+                        "fixture_id": String(fixtureId),
+                        "home_team": homeTeam,
+                        "away_team": awayTeam
+                    ]
+                )
+            } catch {
+                logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+            }
+        }
+    }
+
+    public func sendSecondHalfStartNotification(
+        fixtureId: Int,
+        homeTeam: String,
+        awayTeam: String,
+        homeScore: Int,
+        awayScore: Int,
+        leagueId: Int,
+        season: Int
+    ) async throws {
+        logger.info("⚽ Sending second half start notification: \(homeTeam) vs \(awayTeam)")
+
+        // Find subscribed devices (using notifyMatchStart for all lifecycle events)
+        let subscriptions = try await db.query(NotificationSubscriptionEntity.self)
+            .filter(\.$leagueId == leagueId)
+            .filter(\.$season == season)
+            .filter(\.$notifyMatchStart == true)
+            .with(\.$device)
+            .all()
+
+        logger.info("Found \(subscriptions.count) second half notification subscribers")
+
+        // Create notification payload
+        let title = "⚽ Second Half"
+        let body = "Second half underway\n\(teamWithFlag(homeTeam)) \(homeScore)-\(awayScore) \(teamWithFlag(awayTeam))"
+
+        // Send to iOS devices
+        let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
+        for subscription in iosDevices {
+            do {
+                try await sendAPNs(
+                    deviceToken: subscription.device.deviceToken,
+                    title: title,
+                    body: body,
+                    badge: 1,
+                    sound: "default",
+                    data: [
+                        "type": "second_half_start",
+                        "fixture_id": String(fixtureId),
+                        "home_team": homeTeam,
+                        "away_team": awayTeam,
+                        "home_score": String(homeScore),
+                        "away_score": String(awayScore)
+                    ],
+                    collapseId: "fixture-\(fixtureId)"
+                )
+            } catch {
+                logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+            }
+        }
+
+        // Send to Android devices
+        let androidDevices = subscriptions.filter { $0.device.platform == "android" }
+        for subscription in androidDevices {
+            do {
+                try await sendFCM(
+                    deviceToken: subscription.device.deviceToken,
+                    title: title,
+                    body: body,
+                    data: [
+                        "type": "second_half_start",
+                        "fixture_id": String(fixtureId),
+                        "home_team": homeTeam,
+                        "away_team": awayTeam,
+                        "home_score": String(homeScore),
+                        "away_score": String(awayScore)
+                    ]
+                )
+            } catch {
+                logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+            }
+        }
+    }
+
+    public func sendMatchEndNotification(
+        fixtureId: Int,
+        homeTeam: String,
+        awayTeam: String,
+        homeScore: Int,
+        awayScore: Int,
+        leagueId: Int,
+        season: Int
+    ) async throws {
+        logger.info("🏁 Sending match end notification: \(homeTeam) \(homeScore)-\(awayScore) \(awayTeam)")
+
+        // Find subscribed devices
+        let subscriptions = try await db.query(NotificationSubscriptionEntity.self)
+            .filter(\.$leagueId == leagueId)
+            .filter(\.$season == season)
+            .filter(\.$notifyMatchEnd == true)
+            .with(\.$device)
+            .all()
+
+        logger.info("Found \(subscriptions.count) match end notification subscribers")
+
+        // Create notification payload
+        let title = "🏁 Full Time"
+        let body = "Match finished\n\(teamWithFlag(homeTeam)) \(homeScore)-\(awayScore) \(teamWithFlag(awayTeam))"
+
+        // Send to iOS devices
+        let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
+        for subscription in iosDevices {
+            do {
+                try await sendAPNs(
+                    deviceToken: subscription.device.deviceToken,
+                    title: title,
+                    body: body,
+                    badge: 1,
+                    sound: "default",
+                    data: [
+                        "type": "match_end",
+                        "fixture_id": String(fixtureId),
+                        "home_team": homeTeam,
+                        "away_team": awayTeam,
+                        "home_score": String(homeScore),
+                        "away_score": String(awayScore)
+                    ],
+                    collapseId: "fixture-\(fixtureId)"
+                )
+            } catch {
+                logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+            }
+        }
+
+        // Send to Android devices
+        let androidDevices = subscriptions.filter { $0.device.platform == "android" }
+        for subscription in androidDevices {
+            do {
+                try await sendFCM(
+                    deviceToken: subscription.device.deviceToken,
+                    title: title,
+                    body: body,
+                    data: [
+                        "type": "match_end",
+                        "fixture_id": String(fixtureId),
+                        "home_team": homeTeam,
+                        "away_team": awayTeam,
+                        "home_score": String(homeScore),
+                        "away_score": String(awayScore)
+                    ]
+                )
+            } catch {
+                logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+            }
+        }
+    }
+
+    public func sendOvertimeStartNotification(
+        fixtureId: Int,
+        homeTeam: String,
+        awayTeam: String,
+        homeScore: Int,
+        awayScore: Int,
+        leagueId: Int,
+        season: Int
+    ) async throws {
+        logger.info("⏱️ Sending overtime start notification: \(homeTeam) vs \(awayTeam)")
+
+        // Find subscribed devices (using notifyMatchStart for all lifecycle events)
+        let subscriptions = try await db.query(NotificationSubscriptionEntity.self)
+            .filter(\.$leagueId == leagueId)
+            .filter(\.$season == season)
+            .filter(\.$notifyMatchStart == true)
+            .with(\.$device)
+            .all()
+
+        logger.info("Found \(subscriptions.count) overtime notification subscribers")
+
+        // Create notification payload
+        let title = "⏱️ Extra Time"
+        let body = "Extra time starting\n\(teamWithFlag(homeTeam)) \(homeScore)-\(awayScore) \(teamWithFlag(awayTeam))"
+
+        // Send to iOS devices
+        let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
+        for subscription in iosDevices {
+            do {
+                try await sendAPNs(
+                    deviceToken: subscription.device.deviceToken,
+                    title: title,
+                    body: body,
+                    badge: 1,
+                    sound: "default",
+                    data: [
+                        "type": "overtime_start",
+                        "fixture_id": String(fixtureId),
+                        "home_team": homeTeam,
+                        "away_team": awayTeam,
+                        "home_score": String(homeScore),
+                        "away_score": String(awayScore)
+                    ],
+                    collapseId: "fixture-\(fixtureId)"
+                )
+            } catch {
+                logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+            }
+        }
+
+        // Send to Android devices
+        let androidDevices = subscriptions.filter { $0.device.platform == "android" }
+        for subscription in androidDevices {
+            do {
+                try await sendFCM(
+                    deviceToken: subscription.device.deviceToken,
+                    title: title,
+                    body: body,
+                    data: [
+                        "type": "overtime_start",
+                        "fixture_id": String(fixtureId),
+                        "home_team": homeTeam,
+                        "away_team": awayTeam,
+                        "home_score": String(homeScore),
+                        "away_score": String(awayScore)
+                    ]
+                )
+            } catch {
+                logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+            }
+        }
+    }
+
+    public func sendPenaltiesStartNotification(
+        fixtureId: Int,
+        homeTeam: String,
+        awayTeam: String,
+        homeScore: Int,
+        awayScore: Int,
+        leagueId: Int,
+        season: Int
+    ) async throws {
+        logger.info("🎯 Sending penalties start notification: \(homeTeam) vs \(awayTeam)")
+
+        // Find subscribed devices (using notifyMatchStart for all lifecycle events)
+        let subscriptions = try await db.query(NotificationSubscriptionEntity.self)
+            .filter(\.$leagueId == leagueId)
+            .filter(\.$season == season)
+            .filter(\.$notifyMatchStart == true)
+            .with(\.$device)
+            .all()
+
+        logger.info("Found \(subscriptions.count) penalties notification subscribers")
+
+        // Create notification payload
+        let title = "🎯 Penalty Shootout"
+        let body = "Penalties starting\n\(teamWithFlag(homeTeam)) \(homeScore)-\(awayScore) \(teamWithFlag(awayTeam))"
+
+        // Send to iOS devices
+        let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
+        for subscription in iosDevices {
+            do {
+                try await sendAPNs(
+                    deviceToken: subscription.device.deviceToken,
+                    title: title,
+                    body: body,
+                    badge: 1,
+                    sound: "default",
+                    data: [
+                        "type": "penalties_start",
+                        "fixture_id": String(fixtureId),
+                        "home_team": homeTeam,
+                        "away_team": awayTeam,
+                        "home_score": String(homeScore),
+                        "away_score": String(awayScore)
+                    ],
+                    collapseId: "fixture-\(fixtureId)"
+                )
+            } catch {
+                logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+            }
+        }
+
+        // Send to Android devices
+        let androidDevices = subscriptions.filter { $0.device.platform == "android" }
+        for subscription in androidDevices {
+            do {
+                try await sendFCM(
+                    deviceToken: subscription.device.deviceToken,
+                    title: title,
+                    body: body,
+                    data: [
+                        "type": "penalties_start",
+                        "fixture_id": String(fixtureId),
+                        "home_team": homeTeam,
+                        "away_team": awayTeam,
+                        "home_score": String(homeScore),
+                        "away_score": String(awayScore)
+                    ]
+                )
+            } catch {
+                logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+            }
+        }
+    }
+
     // MARK: - Live Activity Management
 
     public func startLiveActivity(

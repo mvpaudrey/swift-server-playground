@@ -384,6 +384,19 @@ public final class LiveMatchBroadcaster: Sendable {
                 updates.append(update)
 
                 logger.info("🆕 New live match: \(fixture.teams.home.name) vs \(fixture.teams.away.name)")
+
+                // Send match start notification
+                Task {
+                    let kickoffDate = ISO8601DateFormatter().date(from: fixture.fixture.date) ?? Date()
+                    try? await notificationService?.sendMatchStartNotification(
+                        fixtureId: fixture.fixture.id,
+                        homeTeam: fixture.teams.home.name,
+                        awayTeam: fixture.teams.away.name,
+                        kickoffTime: kickoffDate,
+                        leagueId: leagueID,
+                        season: season
+                    )
+                }
             }
 
             // Save to database
@@ -416,6 +429,19 @@ public final class LiveMatchBroadcaster: Sendable {
                 updates.append(update)
 
                 logger.info("🏁 Match finished: \(finalFixture.teams.home.name) \(finalFixture.goals.home ?? 0)-\(finalFixture.goals.away ?? 0) \(finalFixture.teams.away.name)")
+
+                // Send match end notification
+                Task {
+                    try? await notificationService?.sendMatchEndNotification(
+                        fixtureId: fixtureID,
+                        homeTeam: finalFixture.teams.home.name,
+                        awayTeam: finalFixture.teams.away.name,
+                        homeScore: finalFixture.goals.home ?? 0,
+                        awayScore: finalFixture.goals.away ?? 0,
+                        leagueId: leagueID,
+                        season: season
+                    )
+                }
 
                 // Save final state
                 try? await fixtureRepository.upsert(
@@ -559,6 +585,60 @@ public final class LiveMatchBroadcaster: Sendable {
         let newEvents = current.events.filter { currentEvent in
             !previous.events.contains { prevEvent in
                 eventsAreEqual(currentEvent, prevEvent)
+            }
+        }
+
+        // Check for status changes (second half, overtime, penalties)
+        let previousStatus = previous.fixture.fixture.status.short
+        let currentStatus = current.fixture.fixture.status.short
+
+        if previousStatus != currentStatus {
+            // Second half start
+            if previousStatus == "HT" && currentStatus == "2H" {
+                logger.info("⚽ SECOND HALF - \(current.fixture.teams.home.name) vs \(current.fixture.teams.away.name)")
+                Task {
+                    try? await notificationService?.sendSecondHalfStartNotification(
+                        fixtureId: current.fixture.fixture.id,
+                        homeTeam: current.fixture.teams.home.name,
+                        awayTeam: current.fixture.teams.away.name,
+                        homeScore: current.fixture.goals.home ?? 0,
+                        awayScore: current.fixture.goals.away ?? 0,
+                        leagueId: leagueID,
+                        season: season
+                    )
+                }
+            }
+
+            // Extra time/overtime start
+            if currentStatus == "ET" {
+                logger.info("⏱️ EXTRA TIME - \(current.fixture.teams.home.name) vs \(current.fixture.teams.away.name)")
+                Task {
+                    try? await notificationService?.sendOvertimeStartNotification(
+                        fixtureId: current.fixture.fixture.id,
+                        homeTeam: current.fixture.teams.home.name,
+                        awayTeam: current.fixture.teams.away.name,
+                        homeScore: current.fixture.goals.home ?? 0,
+                        awayScore: current.fixture.goals.away ?? 0,
+                        leagueId: leagueID,
+                        season: season
+                    )
+                }
+            }
+
+            // Penalty shootout start
+            if currentStatus == "P" {
+                logger.info("🎯 PENALTIES - \(current.fixture.teams.home.name) vs \(current.fixture.teams.away.name)")
+                Task {
+                    try? await notificationService?.sendPenaltiesStartNotification(
+                        fixtureId: current.fixture.fixture.id,
+                        homeTeam: current.fixture.teams.home.name,
+                        awayTeam: current.fixture.teams.away.name,
+                        homeScore: current.fixture.goals.home ?? 0,
+                        awayScore: current.fixture.goals.away ?? 0,
+                        leagueId: leagueID,
+                        season: season
+                    )
+                }
             }
         }
 
