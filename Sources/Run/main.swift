@@ -125,6 +125,17 @@ struct Main {
         // Daily fixture sync at midnight (local time) default-on
         // Disable with FIXTURE_DAILY_SYNC=false
         if !leagues.isEmpty, Environment.get("FIXTURE_DAILY_SYNC") != "false" {
+            let calendar = Calendar.current
+            if let nextMidnight = calendar.nextDate(
+                after: Date(),
+                matching: DateComponents(hour: 0, minute: 0, second: 0),
+                matchingPolicy: .nextTime
+            ) {
+                app.logger.info("🗓️ Daily fixture sync enabled; next run at \(nextMidnight)")
+            } else {
+                app.logger.warning("⚠️ Daily fixture sync enabled but next midnight could not be determined")
+            }
+
             fixtureSyncService.startDailyMidnightSync(leagues: leagues)
         }
 
@@ -132,7 +143,12 @@ struct Main {
         // Disable with FIXTURE_SYNC_ON_STARTUP=false
         if !leagues.isEmpty, Environment.get("FIXTURE_SYNC_ON_STARTUP") != "false" {
             Task {
-                await fixtureSyncService.syncAll(leagues: leagues)
+                let success = await fixtureSyncService.syncAll(leagues: leagues)
+                if success {
+                    app.logger.info("✅ Fixture startup sync completed")
+                } else {
+                    app.logger.error("❌ Fixture startup sync completed with errors")
+                }
             }
         }
 

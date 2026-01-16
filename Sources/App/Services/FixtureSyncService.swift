@@ -98,7 +98,9 @@ public final class FixtureSyncService: Sendable {
     }
 
     /// Trigger a one-off sync for all leagues
-    public func syncAll(leagues: [(id: Int, season: Int, name: String)]) async {
+    @discardableResult
+    public func syncAll(leagues: [(id: Int, season: Int, name: String)]) async -> Bool {
+        var didFail = false
         for league in leagues {
             if Task.isCancelled { break }
             do {
@@ -108,9 +110,11 @@ public final class FixtureSyncService: Sendable {
                     competition: league.name
                 )
             } catch {
+                didFail = true
                 logger.error("❌ Failed to sync fixtures for \(league.name): \(error)")
             }
         }
+        return !didFail
     }
 
     // MARK: - Private Implementation
