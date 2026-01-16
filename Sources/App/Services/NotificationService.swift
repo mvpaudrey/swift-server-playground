@@ -254,6 +254,16 @@ public actor NotificationService {
         let title = "⚽ GOAL!"
         let assistText = assist.map { " (assist: \($0))" } ?? ""
         let body = "\(scorer) scores!\(assistText)\n\(teamWithFlag(homeTeam)) \(homeGoals)-\(awayGoals) \(teamWithFlag(awayTeam)) (\(minute)')"
+        let payload = payloadString(
+            title: title,
+            body: body,
+            data: [
+                "type": "goal",
+                "fixture_id": String(fixtureId),
+                "scorer": scorer,
+                "minute": String(minute)
+            ]
+        )
 
         // Send to iOS devices
         let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
@@ -271,10 +281,27 @@ public actor NotificationService {
                         "scorer": scorer,
                         "minute": String(minute)
                     ],
-                    collapseId: "fixture-\(fixtureId)"
+                    collapseId: "fixture-\(fixtureId)-goal"
+                )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "goal",
+                    payload: payload,
+                    platform: "ios",
+                    status: "sent"
                 )
             } catch {
                 logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "goal",
+                    payload: payload,
+                    platform: "ios",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
 
@@ -293,8 +320,25 @@ public actor NotificationService {
                         "minute": String(minute)
                     ]
                 )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "goal",
+                    payload: payload,
+                    platform: "android",
+                    status: "sent"
+                )
             } catch {
                 logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "goal",
+                    payload: payload,
+                    platform: "android",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
 
@@ -338,6 +382,17 @@ public actor NotificationService {
         // Create notification payload
         let title = "🟥 RED CARD!"
         let body = "\(playerName) (\(teamWithFlag(teamName))) sent off!\n\(teamWithFlag(homeTeam)) vs \(teamWithFlag(awayTeam)) (\(minute)')"
+        let payload = payloadString(
+            title: title,
+            body: body,
+            data: [
+                "type": "red_card",
+                "fixture_id": String(fixtureId),
+                "player": playerName,
+                "team": teamName,
+                "minute": String(minute)
+            ]
+        )
 
         // Send to iOS devices
         let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
@@ -356,10 +411,27 @@ public actor NotificationService {
                         "team": teamName,
                         "minute": String(minute)
                     ],
-                    collapseId: "fixture-\(fixtureId)"
+                    collapseId: "fixture-\(fixtureId)-red_card"
+                )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "red_card",
+                    payload: payload,
+                    platform: "ios",
+                    status: "sent"
                 )
             } catch {
                 logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "red_card",
+                    payload: payload,
+                    platform: "ios",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
 
@@ -379,8 +451,25 @@ public actor NotificationService {
                         "minute": String(minute)
                     ]
                 )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "red_card",
+                    payload: payload,
+                    platform: "android",
+                    status: "sent"
+                )
             } catch {
                 logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "red_card",
+                    payload: payload,
+                    platform: "android",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
     }
@@ -413,6 +502,16 @@ public actor NotificationService {
         formatter.dateFormat = "HH:mm"
         let timeString = formatter.string(from: kickoffTime)
         let body = "Match starting now\n\(teamWithFlag(homeTeam)) vs \(teamWithFlag(awayTeam)) (\(timeString))"
+        let payload = payloadString(
+            title: title,
+            body: body,
+            data: [
+                "type": "match_start",
+                "fixture_id": String(fixtureId),
+                "home_team": homeTeam,
+                "away_team": awayTeam
+            ]
+        )
 
         // Send to iOS devices
         let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
@@ -430,10 +529,27 @@ public actor NotificationService {
                         "home_team": homeTeam,
                         "away_team": awayTeam
                     ],
-                    collapseId: "fixture-\(fixtureId)"
+                    collapseId: "fixture-\(fixtureId)-match_start"
+                )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "match_start",
+                    payload: payload,
+                    platform: "ios",
+                    status: "sent"
                 )
             } catch {
                 logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "match_start",
+                    payload: payload,
+                    platform: "ios",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
 
@@ -452,8 +568,25 @@ public actor NotificationService {
                         "away_team": awayTeam
                     ]
                 )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "match_start",
+                    payload: payload,
+                    platform: "android",
+                    status: "sent"
+                )
             } catch {
                 logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "match_start",
+                    payload: payload,
+                    platform: "android",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
     }
@@ -482,6 +615,18 @@ public actor NotificationService {
         // Create notification payload
         let title = "⚽ Second Half"
         let body = "Second half underway\n\(teamWithFlag(homeTeam)) \(homeScore)-\(awayScore) \(teamWithFlag(awayTeam))"
+        let payload = payloadString(
+            title: title,
+            body: body,
+            data: [
+                "type": "second_half_start",
+                "fixture_id": String(fixtureId),
+                "home_team": homeTeam,
+                "away_team": awayTeam,
+                "home_score": String(homeScore),
+                "away_score": String(awayScore)
+            ]
+        )
 
         // Send to iOS devices
         let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
@@ -501,10 +646,27 @@ public actor NotificationService {
                         "home_score": String(homeScore),
                         "away_score": String(awayScore)
                     ],
-                    collapseId: "fixture-\(fixtureId)"
+                    collapseId: "fixture-\(fixtureId)-second_half_start"
+                )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "second_half_start",
+                    payload: payload,
+                    platform: "ios",
+                    status: "sent"
                 )
             } catch {
                 logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "second_half_start",
+                    payload: payload,
+                    platform: "ios",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
 
@@ -525,8 +687,25 @@ public actor NotificationService {
                         "away_score": String(awayScore)
                     ]
                 )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "second_half_start",
+                    payload: payload,
+                    platform: "android",
+                    status: "sent"
+                )
             } catch {
                 logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "second_half_start",
+                    payload: payload,
+                    platform: "android",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
     }
@@ -555,6 +734,18 @@ public actor NotificationService {
         // Create notification payload
         let title = "🏁 Full Time"
         let body = "Match finished\n\(teamWithFlag(homeTeam)) \(homeScore)-\(awayScore) \(teamWithFlag(awayTeam))"
+        let payload = payloadString(
+            title: title,
+            body: body,
+            data: [
+                "type": "match_end",
+                "fixture_id": String(fixtureId),
+                "home_team": homeTeam,
+                "away_team": awayTeam,
+                "home_score": String(homeScore),
+                "away_score": String(awayScore)
+            ]
+        )
 
         // Send to iOS devices
         let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
@@ -574,10 +765,27 @@ public actor NotificationService {
                         "home_score": String(homeScore),
                         "away_score": String(awayScore)
                     ],
-                    collapseId: "fixture-\(fixtureId)"
+                    collapseId: "fixture-\(fixtureId)-match_end"
+                )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "match_end",
+                    payload: payload,
+                    platform: "ios",
+                    status: "sent"
                 )
             } catch {
                 logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "match_end",
+                    payload: payload,
+                    platform: "ios",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
 
@@ -598,8 +806,25 @@ public actor NotificationService {
                         "away_score": String(awayScore)
                     ]
                 )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "match_end",
+                    payload: payload,
+                    platform: "android",
+                    status: "sent"
+                )
             } catch {
                 logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "match_end",
+                    payload: payload,
+                    platform: "android",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
     }
@@ -628,6 +853,18 @@ public actor NotificationService {
         // Create notification payload
         let title = "⏱️ Extra Time"
         let body = "Extra time starting\n\(teamWithFlag(homeTeam)) \(homeScore)-\(awayScore) \(teamWithFlag(awayTeam))"
+        let payload = payloadString(
+            title: title,
+            body: body,
+            data: [
+                "type": "overtime_start",
+                "fixture_id": String(fixtureId),
+                "home_team": homeTeam,
+                "away_team": awayTeam,
+                "home_score": String(homeScore),
+                "away_score": String(awayScore)
+            ]
+        )
 
         // Send to iOS devices
         let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
@@ -647,10 +884,27 @@ public actor NotificationService {
                         "home_score": String(homeScore),
                         "away_score": String(awayScore)
                     ],
-                    collapseId: "fixture-\(fixtureId)"
+                    collapseId: "fixture-\(fixtureId)-overtime_start"
+                )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "overtime_start",
+                    payload: payload,
+                    platform: "ios",
+                    status: "sent"
                 )
             } catch {
                 logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "overtime_start",
+                    payload: payload,
+                    platform: "ios",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
 
@@ -671,8 +925,25 @@ public actor NotificationService {
                         "away_score": String(awayScore)
                     ]
                 )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "overtime_start",
+                    payload: payload,
+                    platform: "android",
+                    status: "sent"
+                )
             } catch {
                 logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "overtime_start",
+                    payload: payload,
+                    platform: "android",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
     }
@@ -701,6 +972,18 @@ public actor NotificationService {
         // Create notification payload
         let title = "🎯 Penalty Shootout"
         let body = "Penalties starting\n\(teamWithFlag(homeTeam)) \(homeScore)-\(awayScore) \(teamWithFlag(awayTeam))"
+        let payload = payloadString(
+            title: title,
+            body: body,
+            data: [
+                "type": "penalties_start",
+                "fixture_id": String(fixtureId),
+                "home_team": homeTeam,
+                "away_team": awayTeam,
+                "home_score": String(homeScore),
+                "away_score": String(awayScore)
+            ]
+        )
 
         // Send to iOS devices
         let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
@@ -720,10 +1003,27 @@ public actor NotificationService {
                         "home_score": String(homeScore),
                         "away_score": String(awayScore)
                     ],
-                    collapseId: "fixture-\(fixtureId)"
+                    collapseId: "fixture-\(fixtureId)-penalties_start"
+                )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "penalties_start",
+                    payload: payload,
+                    platform: "ios",
+                    status: "sent"
                 )
             } catch {
                 logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "penalties_start",
+                    payload: payload,
+                    platform: "ios",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
 
@@ -744,8 +1044,25 @@ public actor NotificationService {
                         "away_score": String(awayScore)
                     ]
                 )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "penalties_start",
+                    payload: payload,
+                    platform: "android",
+                    status: "sent"
+                )
             } catch {
                 logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "penalties_start",
+                    payload: payload,
+                    platform: "android",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
             }
         }
     }
@@ -934,6 +1251,51 @@ public actor NotificationService {
     }
 
     // MARK: - Private Methods
+    private func payloadString(
+        title: String,
+        body: String,
+        data: [String: String]
+    ) -> String? {
+        let payload: [String: Any] = [
+            "title": title,
+            "body": body,
+            "data": data
+        ]
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
+            return nil
+        }
+
+        return String(data: jsonData, encoding: .utf8)
+    }
+
+    private func recordNotificationHistory(
+        deviceId: UUID?,
+        fixtureId: Int,
+        notificationType: String,
+        payload: String?,
+        platform: String,
+        status: String,
+        errorMessage: String? = nil,
+        responseCode: Int? = nil
+    ) async {
+        let history = NotificationHistoryEntity(
+            deviceId: deviceId,
+            fixtureId: fixtureId,
+            notificationType: notificationType,
+            payload: payload,
+            platform: platform,
+            status: status,
+            errorMessage: errorMessage,
+            responseCode: responseCode
+        )
+
+        do {
+            try await history.save(on: db)
+        } catch {
+            logger.warning("⚠️ Failed to save notification history: \(error)")
+        }
+    }
 
     /// Send Apple Push Notification
     private func sendAPNs(
