@@ -73,6 +73,27 @@ The server can automatically initialize the database with fixture data on startu
 - `135` - Serie A
 - `61` - Ligue 1
 
+## Fixture Sync Configuration
+
+The server can keep fixtures up to date via periodic and scheduled syncs.
+
+### FIXTURE_SYNC_INTERVAL
+- **Description**: Interval for periodic fixture sync (in seconds)
+- **Default**: `1800` (30 minutes)
+- **Example**: `FIXTURE_SYNC_INTERVAL=900`
+
+### FIXTURE_SYNC_ON_STARTUP
+- **Description**: Run a one-off fixture sync on server startup
+- **Default**: `true`
+- **Values**: `true` or `false`
+- **Example**: `FIXTURE_SYNC_ON_STARTUP=false`
+
+### FIXTURE_DAILY_SYNC
+- **Description**: Run a fixture sync once per day at local midnight
+- **Default**: `true`
+- **Values**: `true` or `false`
+- **Example**: `FIXTURE_DAILY_SYNC=false`
+
 ## Usage Examples
 
 ### Example 1: Using start-server.sh (Recommended for Development)

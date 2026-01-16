@@ -126,6 +126,11 @@ LOG_LEVEL=debug
 INIT_LEAGUES=6:2025:AFCON 2025
 AUTO_INIT=true
 
+# Fixture Sync Configuration
+FIXTURE_SYNC_INTERVAL=1800
+FIXTURE_SYNC_ON_STARTUP=true
+FIXTURE_DAILY_SYNC=true
+
 # Push Notifications (Optional - leave empty for now)
 APNS_KEY_ID=
 APNS_TEAM_ID=

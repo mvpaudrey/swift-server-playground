@@ -193,15 +193,18 @@ Features:
 The server includes **FixtureSyncService** that automatically keeps fixture data fresh:
 
 - **Default Interval**: 30 minutes (configurable via `FIXTURE_SYNC_INTERVAL`)
-- **Auto-Start**: Enabled on server startup for all configured leagues
+- **Auto-Start**: Enabled on server startup for all configured leagues (runs immediately)
+- **Daily Sync**: Runs once per day at local midnight (disable with `FIXTURE_DAILY_SYNC=false`)
 - **Smart Updates**: Updates database and clears cache to ensure fresh data
 - **Zero Client Impact**: Happens in background, transparent to clients
 
 **How it works:**
 1. On server start, fixtures are fetched from API if database is empty
-2. Background service syncs all configured leagues periodically
-3. Database is updated (upserts - creates new, updates existing)
-4. Cache is invalidated to ensure next requests get fresh data
+2. A one-off sync runs on startup (disable with `FIXTURE_SYNC_ON_STARTUP=false`)
+3. Background service syncs all configured leagues periodically
+4. Daily sync runs at midnight local time
+5. Database is updated (upserts - creates new, updates existing)
+6. Cache is invalidated to ensure next requests get fresh data
 
 **Manual sync via gRPC:**
 ```bash
@@ -279,6 +282,8 @@ export PAUSE_AFCON_LIVE_MATCHES="true"  # Pause polling during development
 
 # Fixture Auto-Sync Configuration
 export FIXTURE_SYNC_INTERVAL="1800"  # Sync interval in seconds (default: 1800 = 30 min)
+export FIXTURE_SYNC_ON_STARTUP="true"  # Run a one-off sync on startup (default: true)
+export FIXTURE_DAILY_SYNC="true"  # Run daily sync at local midnight (default: true)
 export AUTO_INIT="true"  # Auto-fetch fixtures on startup (default: true)
 export INIT_LEAGUES="6:2025:AFCON2025"  # Leagues to auto-sync (format: id:season:name)
 ```

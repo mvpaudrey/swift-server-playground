@@ -15,6 +15,7 @@ public final class FixtureSyncService: Sendable {
 
     // Track active sync task
     private let syncTaskLock = Mutex<Task<Void, Never>?>(nil)
+    private let dailySyncTaskLock = Mutex<Task<Void, Never>?>(nil)
 
     public init(
         apiClient: APIFootballClient,
@@ -52,6 +53,25 @@ public final class FixtureSyncService: Sendable {
         }
     }
 
+    /// Start daily fixture sync at local midnight
+    public func startDailyMidnightSync(leagues: [(id: Int, season: Int, name: String)]) {
+        dailySyncTaskLock.withLock { task in
+            guard task == nil else {
+                logger.debug("⏭️ Fixture daily sync already running")
+                return
+            }
+
+            logger.info("🗓️ Starting daily fixture sync at midnight")
+
+            let dailyTask: Task<Void, Never> = Task.detached(priority: .background) { [weak self] in
+                await self?.dailySyncLoop(leagues: leagues)
+                return ()
+            }
+
+            task = dailyTask
+        }
+    }
+
     /// Stop automatic fixture syncing
     public func stopAutoSync() {
         syncTaskLock.withLock { task in
@@ -62,9 +82,35 @@ public final class FixtureSyncService: Sendable {
         }
     }
 
+    /// Stop daily fixture syncing
+    public func stopDailyMidnightSync() {
+        dailySyncTaskLock.withLock { task in
+            if let task = task {
+                logger.info("🛑 Stopping daily fixture sync")
+                task.cancel()
+            }
+        }
+    }
+
     /// Manually trigger a fixture sync for specific league
     public func syncNow(leagueID: Int, season: Int, competition: String) async throws {
         try await syncFixtures(leagueID: leagueID, season: season, competition: competition)
+    }
+
+    /// Trigger a one-off sync for all leagues
+    public func syncAll(leagues: [(id: Int, season: Int, name: String)]) async {
+        for league in leagues {
+            if Task.isCancelled { break }
+            do {
+                try await syncFixtures(
+                    leagueID: league.id,
+                    season: league.season,
+                    competition: league.name
+                )
+            } catch {
+                logger.error("❌ Failed to sync fixtures for \(league.name): \(error)")
+            }
+        }
     }
 
     // MARK: - Private Implementation
@@ -110,6 +156,49 @@ public final class FixtureSyncService: Sendable {
         }
 
         logger.info("✅ Fixture sync loop stopped")
+    }
+
+    private func dailySyncLoop(leagues: [(id: Int, season: Int, name: String)]) async {
+        logger.info("🗓️ Fixture daily sync loop started for \(leagues.count) league(s)")
+        let calendar = Calendar.current
+
+        while !Task.isCancelled {
+            guard let nextMidnight = calendar.nextDate(
+                after: Date(),
+                matching: DateComponents(hour: 0, minute: 0, second: 0),
+                matchingPolicy: .nextTime
+            ) else {
+                logger.error("❌ Failed to compute next midnight; retrying in 1 hour")
+                try? await Task.sleep(nanoseconds: 3_600_000_000_000)
+                continue
+            }
+
+            let waitSeconds = max(0, nextMidnight.timeIntervalSinceNow)
+            logger.info("⏰ Next daily fixture sync at \(nextMidnight)")
+
+            do {
+                try await Task.sleep(nanoseconds: UInt64(waitSeconds * 1_000_000_000))
+            } catch {
+                if Task.isCancelled { break }
+            }
+
+            if Task.isCancelled { break }
+
+            for league in leagues {
+                if Task.isCancelled { break }
+                do {
+                    try await syncFixtures(
+                        leagueID: league.id,
+                        season: league.season,
+                        competition: league.name
+                    )
+                } catch {
+                    logger.error("❌ Failed daily sync for \(league.name): \(error)")
+                }
+            }
+        }
+
+        logger.info("✅ Fixture daily sync loop stopped")
     }
 
     /// Sync fixtures for a specific league from API to database

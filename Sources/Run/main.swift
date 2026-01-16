@@ -122,6 +122,20 @@ struct Main {
             fixtureSyncService.startAutoSync(leagues: leagues)
         }
 
+        // Daily fixture sync at midnight (local time) default-on
+        // Disable with FIXTURE_DAILY_SYNC=false
+        if !leagues.isEmpty, Environment.get("FIXTURE_DAILY_SYNC") != "false" {
+            fixtureSyncService.startDailyMidnightSync(leagues: leagues)
+        }
+
+        // One-off fixture sync on startup (default-on)
+        // Disable with FIXTURE_SYNC_ON_STARTUP=false
+        if !leagues.isEmpty, Environment.get("FIXTURE_SYNC_ON_STARTUP") != "false" {
+            Task {
+                await fixtureSyncService.syncAll(leagues: leagues)
+            }
+        }
+
         // Configure gRPC server with grpc-swift 2.x API
         let server = GRPCServer(
             transport: .http2NIOPosix(
