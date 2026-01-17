@@ -645,10 +645,37 @@ public final class LiveMatchBroadcaster: Sendable {
         for newEvent in newEvents {
             let eventType = newEvent.type?.lowercased() ?? "unknown"
             let elapsed = newEvent.time?.elapsed ?? 0
-            let playerName = newEvent.player?.name ?? "Unknown"
-            let teamName = newEvent.team?.name ?? "Unknown Team"
+            let playerName = newEvent.player?.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let teamName = newEvent.team?.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = newEvent.detail?.lowercased() ?? ""
 
             if eventType == "goal" {
+                guard let playerName, !playerName.isEmpty, playerName.lowercased() != "unknown",
+                      let teamName, !teamName.isEmpty, teamName.lowercased() != "unknown" else {
+                    logger.debug("⏭️ Skipping goal notification with incomplete data (fixture \(current.fixture.fixture.id))")
+                    continue
+                }
+
+                let isMissedPenalty = detail.contains("miss") && detail.contains("pen")
+                if isMissedPenalty {
+                    logger.info("❌ MISSED PENALTY - \(teamName) | \(elapsed)' \(playerName) | League \(leagueID)")
+
+                    Task {
+                        try? await notificationService?.sendMissedPenaltyNotification(
+                            fixtureId: current.fixture.fixture.id,
+                            homeTeam: current.fixture.teams.home.name,
+                            awayTeam: current.fixture.teams.away.name,
+                            homeGoals: current.fixture.goals.home ?? 0,
+                            awayGoals: current.fixture.goals.away ?? 0,
+                            playerName: playerName,
+                            minute: elapsed,
+                            leagueId: leagueID,
+                            season: season
+                        )
+                    }
+                    continue
+                }
+
                 logger.info("⚽️ GOAL - \(teamName) | \(elapsed)' \(playerName) | League \(leagueID)")
 
                 // Send notification
@@ -667,22 +694,29 @@ public final class LiveMatchBroadcaster: Sendable {
                     )
                 }
             } else if eventType == "card" {
-                let detail = newEvent.detail?.lowercased() ?? ""
                 let cardEmoji = detail.contains("red") ? "🟥" : "🟨"
-                logger.info("\(cardEmoji) CARD - \(teamName) | \(elapsed)' \(playerName)")
+                if let teamName, !teamName.isEmpty, teamName.lowercased() != "unknown",
+                   let playerName, !playerName.isEmpty, playerName.lowercased() != "unknown" {
+                    logger.info("\(cardEmoji) CARD - \(teamName) | \(elapsed)' \(playerName)")
+                } else {
+                    logger.debug("⏭️ Skipping card notification with incomplete data (fixture \(current.fixture.fixture.id))")
+                }
 
                 if detail.contains("red") {
                     Task {
-                        try? await notificationService?.sendRedCardNotification(
-                            fixtureId: current.fixture.fixture.id,
-                            homeTeam: current.fixture.teams.home.name,
-                            awayTeam: current.fixture.teams.away.name,
-                            playerName: playerName,
-                            teamName: teamName,
-                            minute: elapsed,
-                            leagueId: leagueID,
-                            season: season
-                        )
+                        if let teamName, !teamName.isEmpty, teamName.lowercased() != "unknown",
+                           let playerName, !playerName.isEmpty, playerName.lowercased() != "unknown" {
+                            try? await notificationService?.sendRedCardNotification(
+                                fixtureId: current.fixture.fixture.id,
+                                homeTeam: current.fixture.teams.home.name,
+                                awayTeam: current.fixture.teams.away.name,
+                                playerName: playerName,
+                                teamName: teamName,
+                                minute: elapsed,
+                                leagueId: leagueID,
+                                season: season
+                            )
+                        }
                     }
                 }
             }

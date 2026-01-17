@@ -105,6 +105,7 @@ public actor NotificationService {
     // Live Activity management
     private var activeActivities: [UUID: LiveActivityTracker] = [:]
     private var cleanupTask: Task<Void, Never>?
+    private var recentNotificationKeys: [String: Date] = [:]
 
     struct APNSConfiguration {
         let keyData: String
@@ -238,6 +239,12 @@ public actor NotificationService {
         leagueId: Int,
         season: Int
     ) async throws {
+        let goalKey = "goal:\(fixtureId):\(minute):\(scorer):\(assist ?? ""):\(homeGoals):\(awayGoals)"
+        guard shouldSendNotification(key: goalKey, ttl: 300) else {
+            logger.debug("⏭️ Skipping duplicate goal notification: \(goalKey)")
+            return
+        }
+
         logger.info("⚽ Sending goal notification: \(scorer) - \(homeTeam) \(homeGoals)-\(awayGoals) \(awayTeam)")
 
         // Find subscribed devices
@@ -248,7 +255,8 @@ public actor NotificationService {
             .with(\.$device)
             .all()
 
-        logger.info("Found \(subscriptions.count) goal notification subscribers")
+        let uniqueSubscriptions = uniqueActiveSubscriptions(from: subscriptions)
+        logger.info("Found \(uniqueSubscriptions.count) goal notification subscribers")
 
         // Create notification payload
         let title = "⚽ GOAL!"
@@ -266,7 +274,7 @@ public actor NotificationService {
         )
 
         // Send to iOS devices
-        let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
+        let iosDevices = uniqueSubscriptions.filter { $0.device.platform == "ios" }
         for subscription in iosDevices {
             do {
                 try await sendAPNs(
@@ -306,7 +314,7 @@ public actor NotificationService {
         }
 
         // Send to Android devices
-        let androidDevices = subscriptions.filter { $0.device.platform == "android" }
+        let androidDevices = uniqueSubscriptions.filter { $0.device.platform == "android" }
         for subscription in androidDevices {
             do {
                 try await sendFCM(
@@ -355,6 +363,124 @@ public actor NotificationService {
         )
     }
 
+    public func sendMissedPenaltyNotification(
+        fixtureId: Int,
+        homeTeam: String,
+        awayTeam: String,
+        homeGoals: Int,
+        awayGoals: Int,
+        playerName: String,
+        minute: Int,
+        leagueId: Int,
+        season: Int
+    ) async throws {
+        let missedPenaltyKey = "missed_penalty:\(fixtureId):\(minute):\(playerName)"
+        guard shouldSendNotification(key: missedPenaltyKey, ttl: 600) else {
+            logger.debug("⏭️ Skipping duplicate missed penalty notification: \(missedPenaltyKey)")
+            return
+        }
+
+        logger.info("❌ Sending missed penalty notification: \(playerName) - \(homeTeam) \(homeGoals)-\(awayGoals) \(awayTeam)")
+
+        let subscriptions = try await db.query(NotificationSubscriptionEntity.self)
+            .filter(\.$leagueId == leagueId)
+            .filter(\.$season == season)
+            .filter(\.$notifyGoals == true)
+            .with(\.$device)
+            .all()
+
+        let uniqueSubscriptions = uniqueActiveSubscriptions(from: subscriptions)
+        logger.info("Found \(uniqueSubscriptions.count) missed penalty notification subscribers")
+
+        let title = "❌ Penalty Missed"
+        let body = "\(playerName) missed the penalty\n\(teamWithFlag(homeTeam)) \(homeGoals)-\(awayGoals) \(teamWithFlag(awayTeam)) (\(minute)')"
+        let payload = payloadString(
+            title: title,
+            body: body,
+            data: [
+                "type": "missed_penalty",
+                "fixture_id": String(fixtureId),
+                "player": playerName,
+                "minute": String(minute)
+            ]
+        )
+
+        let iosDevices = uniqueSubscriptions.filter { $0.device.platform == "ios" }
+        for subscription in iosDevices {
+            do {
+                try await sendAPNs(
+                    deviceToken: subscription.device.deviceToken,
+                    title: title,
+                    body: body,
+                    badge: 1,
+                    sound: "default",
+                    data: [
+                        "type": "missed_penalty",
+                        "fixture_id": String(fixtureId),
+                        "player": playerName,
+                        "minute": String(minute)
+                    ],
+                    collapseId: "fixture-\(fixtureId)-missed_penalty"
+                )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "missed_penalty",
+                    payload: payload,
+                    platform: "ios",
+                    status: "sent"
+                )
+            } catch {
+                logger.error("Failed to send APNs to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "missed_penalty",
+                    payload: payload,
+                    platform: "ios",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
+            }
+        }
+
+        let androidDevices = uniqueSubscriptions.filter { $0.device.platform == "android" }
+        for subscription in androidDevices {
+            do {
+                try await sendFCM(
+                    deviceToken: subscription.device.deviceToken,
+                    title: title,
+                    body: body,
+                    data: [
+                        "type": "missed_penalty",
+                        "fixture_id": String(fixtureId),
+                        "player": playerName,
+                        "minute": String(minute)
+                    ]
+                )
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "missed_penalty",
+                    payload: payload,
+                    platform: "android",
+                    status: "sent"
+                )
+            } catch {
+                logger.error("Failed to send FCM to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                await recordNotificationHistory(
+                    deviceId: subscription.device.id,
+                    fixtureId: fixtureId,
+                    notificationType: "missed_penalty",
+                    payload: payload,
+                    platform: "android",
+                    status: "failed",
+                    errorMessage: String(describing: error)
+                )
+            }
+        }
+    }
+
     // MARK: - Red Card Notifications
 
     public func sendRedCardNotification(
@@ -367,6 +493,12 @@ public actor NotificationService {
         leagueId: Int,
         season: Int
     ) async throws {
+        let redCardKey = "red_card:\(fixtureId):\(minute):\(playerName):\(teamName)"
+        guard shouldSendNotification(key: redCardKey, ttl: 600) else {
+            logger.debug("⏭️ Skipping duplicate red card notification: \(redCardKey)")
+            return
+        }
+
         logger.info("🟥 Sending red card notification: \(playerName) (\(teamName)) - \(minute)'")
 
         // Find subscribed devices
@@ -377,7 +509,8 @@ public actor NotificationService {
             .with(\.$device)
             .all()
 
-        logger.info("Found \(subscriptions.count) red card notification subscribers")
+        let uniqueSubscriptions = uniqueActiveSubscriptions(from: subscriptions)
+        logger.info("Found \(uniqueSubscriptions.count) red card notification subscribers")
 
         // Create notification payload
         let title = "🟥 RED CARD!"
@@ -395,7 +528,7 @@ public actor NotificationService {
         )
 
         // Send to iOS devices
-        let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
+        let iosDevices = uniqueSubscriptions.filter { $0.device.platform == "ios" }
         for subscription in iosDevices {
             do {
                 try await sendAPNs(
@@ -436,7 +569,7 @@ public actor NotificationService {
         }
 
         // Send to Android devices
-        let androidDevices = subscriptions.filter { $0.device.platform == "android" }
+        let androidDevices = uniqueSubscriptions.filter { $0.device.platform == "android" }
         for subscription in androidDevices {
             do {
                 try await sendFCM(
@@ -484,6 +617,12 @@ public actor NotificationService {
         leagueId: Int,
         season: Int
     ) async throws {
+        let matchStartKey = "match_start:\(fixtureId)"
+        guard shouldSendNotification(key: matchStartKey, ttl: 24 * 60 * 60) else {
+            logger.debug("⏭️ Skipping duplicate match start notification: \(matchStartKey)")
+            return
+        }
+
         logger.info("⚽ Sending match start notification: \(homeTeam) vs \(awayTeam)")
 
         // Find subscribed devices
@@ -494,7 +633,8 @@ public actor NotificationService {
             .with(\.$device)
             .all()
 
-        logger.info("Found \(subscriptions.count) match start notification subscribers")
+        let uniqueSubscriptions = uniqueActiveSubscriptions(from: subscriptions)
+        logger.info("Found \(uniqueSubscriptions.count) match start notification subscribers")
 
         // Create notification payload
         let title = "⚽ Kick-off!"
@@ -514,7 +654,7 @@ public actor NotificationService {
         )
 
         // Send to iOS devices
-        let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
+        let iosDevices = uniqueSubscriptions.filter { $0.device.platform == "ios" }
         for subscription in iosDevices {
             do {
                 try await sendAPNs(
@@ -554,7 +694,7 @@ public actor NotificationService {
         }
 
         // Send to Android devices
-        let androidDevices = subscriptions.filter { $0.device.platform == "android" }
+        let androidDevices = uniqueSubscriptions.filter { $0.device.platform == "android" }
         for subscription in androidDevices {
             do {
                 try await sendFCM(
@@ -600,6 +740,12 @@ public actor NotificationService {
         leagueId: Int,
         season: Int
     ) async throws {
+        let secondHalfKey = "second_half_start:\(fixtureId)"
+        guard shouldSendNotification(key: secondHalfKey, ttl: 12 * 60 * 60) else {
+            logger.debug("⏭️ Skipping duplicate second half notification: \(secondHalfKey)")
+            return
+        }
+
         logger.info("⚽ Sending second half start notification: \(homeTeam) vs \(awayTeam)")
 
         // Find subscribed devices (using notifyMatchStart for all lifecycle events)
@@ -610,7 +756,8 @@ public actor NotificationService {
             .with(\.$device)
             .all()
 
-        logger.info("Found \(subscriptions.count) second half notification subscribers")
+        let uniqueSubscriptions = uniqueActiveSubscriptions(from: subscriptions)
+        logger.info("Found \(uniqueSubscriptions.count) second half notification subscribers")
 
         // Create notification payload
         let title = "⚽ Second Half"
@@ -629,7 +776,7 @@ public actor NotificationService {
         )
 
         // Send to iOS devices
-        let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
+        let iosDevices = uniqueSubscriptions.filter { $0.device.platform == "ios" }
         for subscription in iosDevices {
             do {
                 try await sendAPNs(
@@ -671,7 +818,7 @@ public actor NotificationService {
         }
 
         // Send to Android devices
-        let androidDevices = subscriptions.filter { $0.device.platform == "android" }
+        let androidDevices = uniqueSubscriptions.filter { $0.device.platform == "android" }
         for subscription in androidDevices {
             do {
                 try await sendFCM(
@@ -719,6 +866,12 @@ public actor NotificationService {
         leagueId: Int,
         season: Int
     ) async throws {
+        let matchEndKey = "match_end:\(fixtureId):\(homeScore):\(awayScore)"
+        guard shouldSendNotification(key: matchEndKey, ttl: 24 * 60 * 60) else {
+            logger.debug("⏭️ Skipping duplicate match end notification: \(matchEndKey)")
+            return
+        }
+
         logger.info("🏁 Sending match end notification: \(homeTeam) \(homeScore)-\(awayScore) \(awayTeam)")
 
         // Find subscribed devices
@@ -729,7 +882,8 @@ public actor NotificationService {
             .with(\.$device)
             .all()
 
-        logger.info("Found \(subscriptions.count) match end notification subscribers")
+        let uniqueSubscriptions = uniqueActiveSubscriptions(from: subscriptions)
+        logger.info("Found \(uniqueSubscriptions.count) match end notification subscribers")
 
         // Create notification payload
         let title = "🏁 Full Time"
@@ -748,7 +902,7 @@ public actor NotificationService {
         )
 
         // Send to iOS devices
-        let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
+        let iosDevices = uniqueSubscriptions.filter { $0.device.platform == "ios" }
         for subscription in iosDevices {
             do {
                 try await sendAPNs(
@@ -790,7 +944,7 @@ public actor NotificationService {
         }
 
         // Send to Android devices
-        let androidDevices = subscriptions.filter { $0.device.platform == "android" }
+        let androidDevices = uniqueSubscriptions.filter { $0.device.platform == "android" }
         for subscription in androidDevices {
             do {
                 try await sendFCM(
@@ -838,6 +992,12 @@ public actor NotificationService {
         leagueId: Int,
         season: Int
     ) async throws {
+        let overtimeKey = "overtime_start:\(fixtureId)"
+        guard shouldSendNotification(key: overtimeKey, ttl: 12 * 60 * 60) else {
+            logger.debug("⏭️ Skipping duplicate overtime notification: \(overtimeKey)")
+            return
+        }
+
         logger.info("⏱️ Sending overtime start notification: \(homeTeam) vs \(awayTeam)")
 
         // Find subscribed devices (using notifyMatchStart for all lifecycle events)
@@ -848,7 +1008,8 @@ public actor NotificationService {
             .with(\.$device)
             .all()
 
-        logger.info("Found \(subscriptions.count) overtime notification subscribers")
+        let uniqueSubscriptions = uniqueActiveSubscriptions(from: subscriptions)
+        logger.info("Found \(uniqueSubscriptions.count) overtime notification subscribers")
 
         // Create notification payload
         let title = "⏱️ Extra Time"
@@ -867,7 +1028,7 @@ public actor NotificationService {
         )
 
         // Send to iOS devices
-        let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
+        let iosDevices = uniqueSubscriptions.filter { $0.device.platform == "ios" }
         for subscription in iosDevices {
             do {
                 try await sendAPNs(
@@ -909,7 +1070,7 @@ public actor NotificationService {
         }
 
         // Send to Android devices
-        let androidDevices = subscriptions.filter { $0.device.platform == "android" }
+        let androidDevices = uniqueSubscriptions.filter { $0.device.platform == "android" }
         for subscription in androidDevices {
             do {
                 try await sendFCM(
@@ -957,6 +1118,12 @@ public actor NotificationService {
         leagueId: Int,
         season: Int
     ) async throws {
+        let penaltiesKey = "penalties_start:\(fixtureId)"
+        guard shouldSendNotification(key: penaltiesKey, ttl: 12 * 60 * 60) else {
+            logger.debug("⏭️ Skipping duplicate penalties notification: \(penaltiesKey)")
+            return
+        }
+
         logger.info("🎯 Sending penalties start notification: \(homeTeam) vs \(awayTeam)")
 
         // Find subscribed devices (using notifyMatchStart for all lifecycle events)
@@ -967,7 +1134,8 @@ public actor NotificationService {
             .with(\.$device)
             .all()
 
-        logger.info("Found \(subscriptions.count) penalties notification subscribers")
+        let uniqueSubscriptions = uniqueActiveSubscriptions(from: subscriptions)
+        logger.info("Found \(uniqueSubscriptions.count) penalties notification subscribers")
 
         // Create notification payload
         let title = "🎯 Penalty Shootout"
@@ -986,7 +1154,7 @@ public actor NotificationService {
         )
 
         // Send to iOS devices
-        let iosDevices = subscriptions.filter { $0.device.platform == "ios" }
+        let iosDevices = uniqueSubscriptions.filter { $0.device.platform == "ios" }
         for subscription in iosDevices {
             do {
                 try await sendAPNs(
@@ -1028,7 +1196,7 @@ public actor NotificationService {
         }
 
         // Send to Android devices
-        let androidDevices = subscriptions.filter { $0.device.platform == "android" }
+        let androidDevices = uniqueSubscriptions.filter { $0.device.platform == "android" }
         for subscription in androidDevices {
             do {
                 try await sendFCM(
@@ -1267,6 +1435,32 @@ public actor NotificationService {
         }
 
         return String(data: jsonData, encoding: .utf8)
+    }
+
+    private func shouldSendNotification(key: String, ttl: TimeInterval) -> Bool {
+        let now = Date()
+        recentNotificationKeys = recentNotificationKeys.filter { $0.value > now }
+        if let expiresAt = recentNotificationKeys[key], expiresAt > now {
+            return false
+        }
+        recentNotificationKeys[key] = now.addingTimeInterval(ttl)
+        return true
+    }
+
+    private func uniqueActiveSubscriptions(
+        from subscriptions: [NotificationSubscriptionEntity]
+    ) -> [NotificationSubscriptionEntity] {
+        var seenTokens = Set<String>()
+        return subscriptions.filter { subscription in
+            let device = subscription.device
+            guard device.isActive else { return false }
+            let token = device.deviceToken
+            if seenTokens.contains(token) {
+                return false
+            }
+            seenTokens.insert(token)
+            return true
+        }
     }
 
     private func recordNotificationHistory(
