@@ -863,6 +863,8 @@ public actor NotificationService {
         awayTeam: String,
         homeScore: Int,
         awayScore: Int,
+        penaltyHomeScore: Int? = nil,
+        penaltyAwayScore: Int? = nil,
         leagueId: Int,
         season: Int
     ) async throws {
@@ -887,18 +889,26 @@ public actor NotificationService {
 
         // Create notification payload
         let title = "🏁 Full Time"
-        let body = "Match finished\n\(teamWithFlag(homeTeam)) \(homeScore)-\(awayScore) \(teamWithFlag(awayTeam))"
+        var body = "Match finished\n\(teamWithFlag(homeTeam)) \(homeScore)-\(awayScore) \(teamWithFlag(awayTeam))"
+        var data: [String: String] = [
+            "type": "match_end",
+            "fixture_id": String(fixtureId),
+            "home_team": homeTeam,
+            "away_team": awayTeam,
+            "home_score": String(homeScore),
+            "away_score": String(awayScore)
+        ]
+        if homeScore == awayScore,
+           let penaltyHomeScore,
+           let penaltyAwayScore {
+            body += " (pens \(penaltyHomeScore)-\(penaltyAwayScore))"
+            data["penalty_home_score"] = String(penaltyHomeScore)
+            data["penalty_away_score"] = String(penaltyAwayScore)
+        }
         let payload = payloadString(
             title: title,
             body: body,
-            data: [
-                "type": "match_end",
-                "fixture_id": String(fixtureId),
-                "home_team": homeTeam,
-                "away_team": awayTeam,
-                "home_score": String(homeScore),
-                "away_score": String(awayScore)
-            ]
+            data: data
         )
 
         // Send to iOS devices
@@ -911,14 +921,7 @@ public actor NotificationService {
                     body: body,
                     badge: 1,
                     sound: "default",
-                    data: [
-                        "type": "match_end",
-                        "fixture_id": String(fixtureId),
-                        "home_team": homeTeam,
-                        "away_team": awayTeam,
-                        "home_score": String(homeScore),
-                        "away_score": String(awayScore)
-                    ],
+                    data: data,
                     collapseId: "fixture-\(fixtureId)-match_end"
                 )
                 await recordNotificationHistory(
@@ -951,14 +954,7 @@ public actor NotificationService {
                     deviceToken: subscription.device.deviceToken,
                     title: title,
                     body: body,
-                    data: [
-                        "type": "match_end",
-                        "fixture_id": String(fixtureId),
-                        "home_team": homeTeam,
-                        "away_team": awayTeam,
-                        "home_score": String(homeScore),
-                        "away_score": String(awayScore)
-                    ]
+                    data: data
                 )
                 await recordNotificationHistory(
                     deviceId: subscription.device.id,

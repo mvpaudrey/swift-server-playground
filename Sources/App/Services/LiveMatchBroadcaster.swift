@@ -438,6 +438,8 @@ public final class LiveMatchBroadcaster: Sendable {
                         awayTeam: finalFixture.teams.away.name,
                         homeScore: finalFixture.goals.home ?? 0,
                         awayScore: finalFixture.goals.away ?? 0,
+                        penaltyHomeScore: finalFixture.score.penalty.home,
+                        penaltyAwayScore: finalFixture.score.penalty.away,
                         leagueId: leagueID,
                         season: season
                     )
