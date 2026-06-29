@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'AFCON Swift gRPC Server - Complete AWS Infrastructure for Production Deployment'
+Description: 'Tournament Swift gRPC Server - Complete AWS Infrastructure for Production Deployment'
 
 # ============================================================================
 # Parameters
@@ -72,10 +72,10 @@ Parameters:
 
   DesiredCount:
     Type: Number
-    Default: 0
+    Default: 1
     MinValue: 0
     MaxValue: 10
-    Description: Desired number of ECS tasks (set to 0 for initial deployment, then scale up after pushing Docker image)
+    Description: Desired number of ECS tasks
 
   MaxCount:
     Type: Number
@@ -111,7 +111,7 @@ Resources:
       EnableDnsSupport: true
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-afcon-vpc
+          Value: !Sub ${EnvironmentName}-tournament-vpc
         - Key: Environment
           Value: !Ref EnvironmentName
 
@@ -120,7 +120,7 @@ Resources:
     Properties:
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-afcon-igw
+          Value: !Sub ${EnvironmentName}-tournament-igw
 
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -349,7 +349,7 @@ Resources:
   DBPasswordSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: !Sub ${EnvironmentName}-afcon-db-password
+      Name: !Sub ${EnvironmentName}-tournament-db-password
       Description: PostgreSQL database password
       GenerateSecretString:
         SecretStringTemplate: '{"username": "postgres"}'
@@ -367,7 +367,7 @@ Resources:
       DBInstanceClass: !Ref DBInstanceClass
       AllocatedStorage: 20
       StorageType: gp3
-      DBName: afcon
+      DBName: tournament
       MasterUsername: postgres
       MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:password}}'
       DBSubnetGroupName: !Ref DBSubnetGroup
@@ -383,7 +383,7 @@ Resources:
         - postgresql
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-afcon-db
+          Value: !Sub ${EnvironmentName}-tournament-db
 
   # ========================================
   # ElastiCache Redis
@@ -399,7 +399,7 @@ Resources:
   RedisReplicationGroup:
     Type: AWS::ElastiCache::ReplicationGroup
     Properties:
-      ReplicationGroupId: !Sub ${EnvironmentName}-afcon-redis
+      ReplicationGroupId: !Sub ${EnvironmentName}-tournament-redis
       ReplicationGroupDescription: Redis cache for AFCON server
       Engine: redis
       CacheNodeType: !Ref CacheNodeType
@@ -412,7 +412,7 @@ Resources:
       TransitEncryptionEnabled: false
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-afcon-redis
+          Value: !Sub ${EnvironmentName}-tournament-redis
 
   # ========================================
   # Application Load Balancer
@@ -420,7 +420,7 @@ Resources:
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub ${EnvironmentName}-afcon-alb
+      Name: !Sub ${EnvironmentName}-tournament-alb
       Type: application
       Scheme: internet-facing
       IpAddressType: ipv4
@@ -431,7 +431,7 @@ Resources:
         - !Ref ALBSecurityGroup
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-afcon-alb
+          Value: !Sub ${EnvironmentName}-tournament-alb
 
   # HTTP Target Group (REST API)
   HTTPTargetGroup:
@@ -546,7 +546,7 @@ Resources:
   ECRRepository:
     Type: AWS::ECR::Repository
     Properties:
-      RepositoryName: afcon-server
+      RepositoryName: !Sub ${EnvironmentName}-tournament-server
       ImageScanningConfiguration:
         ScanOnPush: true
       LifecyclePolicy:
@@ -565,7 +565,7 @@ Resources:
           }
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-afcon-ecr
+          Value: !Sub ${EnvironmentName}-tournament-ecr
 
   # ========================================
   # ECS Cluster
@@ -573,7 +573,7 @@ Resources:
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      ClusterName: !Sub ${EnvironmentName}-afcon-cluster
+      ClusterName: !Sub ${EnvironmentName}-tournament-cluster
       CapacityProviders:
         - FARGATE
         - FARGATE_SPOT
@@ -588,7 +588,7 @@ Resources:
           Value: enabled
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-afcon-cluster
+          Value: !Sub ${EnvironmentName}-tournament-cluster
 
   # ECS Task Execution Role
   ECSTaskExecutionRole:
@@ -613,7 +613,6 @@ Resources:
                   - !Ref DBPasswordSecret
                   - !Ref APIFootballKeySecret
                   - !Ref APNSSecret
-                  - !Ref FCMSecret
 
   # ECS Task Role
   ECSTaskRole:
@@ -639,14 +638,14 @@ Resources:
   CloudWatchLogsGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /ecs/${EnvironmentName}-afcon-server
+      LogGroupName: !Sub /ecs/${EnvironmentName}-tournament-server
       RetentionInDays: !If [IsProduction, 30, 7]
 
   # ECS Task Definition
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: afcon-server
+      Family: !Sub ${EnvironmentName}-tournament-server
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -655,8 +654,8 @@ Resources:
       ExecutionRoleArn: !Ref ECSTaskExecutionRole
       TaskRoleArn: !Ref ECSTaskRole
       ContainerDefinitions:
-        - Name: afcon-server
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/afcon-server:latest
+        - Name: !Sub ${EnvironmentName}-tournament-server
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EnvironmentName}-tournament-server:latest
           Essential: true
           PortMappings:
             - ContainerPort: 8080
@@ -674,7 +673,7 @@ Resources:
               Value: info
             - Name: DATABASE_URL
               Value: !Sub
-                - 'postgres://postgres:{{resolve:secretsmanager:${SecretArn}:SecretString:password}}@${DBEndpoint}:5432/afcon?sslmode=require'
+                - 'postgres://postgres:{{resolve:secretsmanager:${SecretArn}:SecretString:password}}@${DBEndpoint}:5432/tournament?sslmode=require'
                 - SecretArn: !Ref DBPasswordSecret
                   DBEndpoint: !GetAtt Database.Endpoint.Address
             - Name: REDIS_URL
@@ -694,8 +693,7 @@ Resources:
               ValueFrom: !Sub '${APNSSecret}:topic::'
             - Name: APNS_KEY
               ValueFrom: !Sub '${APNSSecret}:key::'
-            - Name: FCM_SERVER_KEY
-              ValueFrom: !Sub '${FCMSecret}:server_key::'
+
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -710,7 +708,7 @@ Resources:
       - HTTPListener
       - GRPCNLBListener
     Properties:
-      ServiceName: afcon-service
+      ServiceName: tournament-service
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref TaskDefinition
       DesiredCount: !Ref DesiredCount
@@ -724,10 +722,10 @@ Resources:
           SecurityGroups:
             - !Ref ECSSecurityGroup
       LoadBalancers:
-        - ContainerName: afcon-server
+        - ContainerName: !Sub ${EnvironmentName}-tournament-server
           ContainerPort: 8080
           TargetGroupArn: !Ref HTTPTargetGroup
-        - ContainerName: afcon-server
+        - ContainerName: !Sub ${EnvironmentName}-tournament-server
           ContainerPort: 50051
           TargetGroupArn: !Ref GRPCNLBTargetGroup
       DeploymentConfiguration:
@@ -738,7 +736,7 @@ Resources:
           Rollback: true
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-afcon-service
+          Value: !Sub ${EnvironmentName}-tournament-service
 
   # Auto Scaling
   ServiceScalingTarget:
@@ -770,23 +768,16 @@ Resources:
   APIFootballKeySecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: !Sub ${EnvironmentName}-afcon-api-football-key
+      Name: !Sub ${EnvironmentName}-tournament-api-football-key
       Description: API-Football API Key
       SecretString: !Sub '{"api_key": "REPLACE_WITH_YOUR_API_KEY"}'
 
   APNSSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: !Sub ${EnvironmentName}-afcon-apns
+      Name: !Sub ${EnvironmentName}-tournament-apns
       Description: Apple Push Notification Service credentials
       SecretString: !Sub '{"key_id": "REPLACE", "team_id": "REPLACE", "topic": "com.yourapp.bundleid"}'
-
-  FCMSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: !Sub ${EnvironmentName}-afcon-fcm
-      Description: Firebase Cloud Messaging server key
-      SecretString: !Sub '{"server_key": "REPLACE_WITH_FCM_SERVER_KEY"}'
 
   # ========================================
   # CloudWatch Alarms
@@ -794,7 +785,7 @@ Resources:
   HighCPUAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${EnvironmentName}-afcon-high-cpu
+      AlarmName: !Sub ${EnvironmentName}-tournament-high-cpu
       AlarmDescription: Alert when CPU exceeds 80%
       MetricName: CPUUtilization
       Namespace: AWS/ECS
@@ -812,7 +803,7 @@ Resources:
   DatabaseConnectionsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${EnvironmentName}-afcon-db-connections
+      AlarmName: !Sub ${EnvironmentName}-tournament-db-connections
       AlarmDescription: Alert when database connections exceed 80%
       MetricName: DatabaseConnections
       Namespace: AWS/RDS
@@ -833,46 +824,46 @@ Outputs:
     Description: DNS name of the Application Load Balancer
     Value: !GetAtt LoadBalancer.DNSName
     Export:
-      Name: !Sub ${EnvironmentName}-afcon-alb-dns
+      Name: !Sub ${EnvironmentName}-tournament-alb-dns
 
   HTTPEndpoint:
     Description: HTTP REST API endpoint
     Value: !Sub http://${LoadBalancer.DNSName}
     Export:
-      Name: !Sub ${EnvironmentName}-afcon-http-endpoint
+      Name: !Sub ${EnvironmentName}-tournament-http-endpoint
 
   GRPCEndpoint:
     Description: gRPC service endpoint (via Network Load Balancer)
     Value: !Sub ${GRPCNetworkLoadBalancer.DNSName}:50051
     Export:
-      Name: !Sub ${EnvironmentName}-afcon-grpc-endpoint
+      Name: !Sub ${EnvironmentName}-tournament-grpc-endpoint
 
   DatabaseEndpoint:
     Description: RDS PostgreSQL endpoint
     Value: !GetAtt Database.Endpoint.Address
     Export:
-      Name: !Sub ${EnvironmentName}-afcon-db-endpoint
+      Name: !Sub ${EnvironmentName}-tournament-db-endpoint
 
   RedisEndpoint:
     Description: ElastiCache Redis primary endpoint
     Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
     Export:
-      Name: !Sub ${EnvironmentName}-afcon-redis-endpoint
+      Name: !Sub ${EnvironmentName}-tournament-redis-endpoint
 
   ECRRepositoryURI:
     Description: ECR repository URI for Docker images
-    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/afcon-server
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EnvironmentName}-tournament-server
     Export:
-      Name: !Sub ${EnvironmentName}-afcon-ecr-uri
+      Name: !Sub ${EnvironmentName}-tournament-ecr-uri
 
   ECSClusterName:
     Description: ECS cluster name
     Value: !Ref ECSCluster
     Export:
-      Name: !Sub ${EnvironmentName}-afcon-cluster-name
+      Name: !Sub ${EnvironmentName}-tournament-cluster-name
 
   ECSServiceName:
     Description: ECS service name
     Value: !GetAtt ECSService.Name
     Export:
-      Name: !Sub ${EnvironmentName}-afcon-service-name
+      Name: !Sub ${EnvironmentName}-tournament-service-name

@@ -75,7 +75,7 @@ check_prerequisites() {
 # Deploy CloudFormation stack
 deploy_stack() {
     local ENV=$1
-    local STACK_NAME="afcon-${ENV}"
+    local STACK_NAME="tournament-${ENV}"
 
     print_header "Deploying CloudFormation Stack: ${STACK_NAME}"
 
@@ -139,19 +139,19 @@ print_next_steps() {
     echo ""
     echo "   ${YELLOW}# API-Football Key${NC}"
     echo "   aws secretsmanager update-secret \\"
-    echo "     --secret-id ${ENV}-afcon-api-football-key \\"
+    echo "     --secret-id ${ENV}-tournament-api-football-key \\"
     echo "     --secret-string '{\"api_key\":\"YOUR_ACTUAL_API_KEY\"}' \\"
     echo "     --region ${AWS_REGION}"
     echo ""
     echo "   ${YELLOW}# APNS Credentials${NC}"
     echo "   aws secretsmanager update-secret \\"
-    echo "     --secret-id ${ENV}-afcon-apns \\"
+    echo "     --secret-id ${ENV}-tournament-apns \\"
     echo "     --secret-string '{\"key_id\":\"YOUR_KEY_ID\",\"team_id\":\"YOUR_TEAM_ID\",\"topic\":\"com.yourapp.bundleid\"}' \\"
     echo "     --region ${AWS_REGION}"
     echo ""
     echo "   ${YELLOW}# FCM Server Key${NC}"
     echo "   aws secretsmanager update-secret \\"
-    echo "     --secret-id ${ENV}-afcon-fcm \\"
+    echo "     --secret-id ${ENV}-tournament-fcm \\"
     echo "     --secret-string '{\"server_key\":\"YOUR_FCM_SERVER_KEY\"}' \\"
     echo "     --region ${AWS_REGION}"
     echo ""

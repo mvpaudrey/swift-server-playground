@@ -78,7 +78,7 @@ public func configure(_ app: Application) async throws {
         let port = Environment.get("PGPORT").flatMap(Int.init) ?? 5432
         let username = Environment.get("PGUSER") ?? "postgres"
         let password = Environment.get("PGPASSWORD") ?? "postgres"
-        let database = Environment.get("PGDATABASE") ?? "afcon"
+        let database = Environment.get("PGDATABASE") ?? "tournament"
         app.databases.use(.postgres(
             hostname: hostname,
             port: port,
@@ -92,7 +92,6 @@ public func configure(_ app: Application) async throws {
     // Migrations
     app.migrations.add(CreateLeagueEntity())
     app.migrations.add(CreateFixtureEntity())
-    app.migrations.add(AddFixtureScoreExtras())
     app.migrations.add(CreateDeviceRegistrationEntity())
     app.migrations.add(CreateNotificationSubscriptionEntity())
     app.migrations.add(CreateNotificationHistoryEntity())

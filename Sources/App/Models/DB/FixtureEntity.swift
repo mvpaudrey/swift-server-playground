@@ -1,6 +1,7 @@
 import Foundation
 import Vapor
 import Fluent
+import SQLKit
 
 public final class FixtureEntity: Model, Content, @unchecked Sendable {
     public static let schema = "fixtures"
@@ -261,14 +262,19 @@ struct CreateFixtureEntity: AsyncMigration {
 }
 
 struct AddFixtureScoreExtras: AsyncMigration {
+    // No-op: columns are added by EnsureFixtureScoreExtras using IF NOT EXISTS
+    func prepare(on database: any Database) async throws {}
+    func revert(on database: any Database) async throws {}
+}
+
+struct EnsureFixtureScoreExtras: AsyncMigration {
     func prepare(on database: any Database) async throws {
-        try await database.schema(FixtureEntity.schema)
-            .field("status_extra", .int)
-            .field("extratime_home", .int)
-            .field("extratime_away", .int)
-            .field("penalty_home", .int)
-            .field("penalty_away", .int)
-            .update()
+        let columns = ["status_extra", "extratime_home", "extratime_away", "penalty_home", "penalty_away"]
+        for column in columns {
+            try await (database as! any SQLDatabase)
+                .raw("ALTER TABLE fixtures ADD COLUMN IF NOT EXISTS \"\(raw: column)\" BIGINT")
+                .run()
+        }
     }
 
     func revert(on database: any Database) async throws {

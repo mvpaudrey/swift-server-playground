@@ -45,7 +45,7 @@ cleanup_redis() {
     # Find Redis replication groups
     REDIS_GROUPS=$(aws elasticache describe-replication-groups \
         --region "${AWS_REGION}" \
-        --query "ReplicationGroups[?starts_with(ReplicationGroupId, '${ENV}-afcon')].ReplicationGroupId" \
+        --query "ReplicationGroups[?starts_with(ReplicationGroupId, '${ENV}-tournament')].ReplicationGroupId" \
         --output text)
 
     if [[ -z "$REDIS_GROUPS" ]]; then
@@ -100,7 +100,7 @@ cleanup_rds() {
     # Find RDS instances
     DB_INSTANCES=$(aws rds describe-db-instances \
         --region "${AWS_REGION}" \
-        --query "DBInstances[?contains(DBInstanceIdentifier, '${ENV}-afcon') || contains(DBInstanceIdentifier, 'afcon')].DBInstanceIdentifier" \
+        --query "DBInstances[?contains(DBInstanceIdentifier, '${ENV}-tournament') || contains(DBInstanceIdentifier, 'tournament')].DBInstanceIdentifier" \
         --output text)
 
     if [[ -z "$DB_INSTANCES" ]]; then
@@ -124,7 +124,7 @@ cleanup_rds() {
 # Delete CloudFormation stack
 cleanup_stack() {
     local ENV=$1
-    local STACK_NAME="afcon-${ENV}"
+    local STACK_NAME="tournament-${ENV}"
 
     print_header "Cleaning Up CloudFormation Stack"
 

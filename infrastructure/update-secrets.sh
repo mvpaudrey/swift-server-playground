@@ -9,7 +9,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-AWS_REGION="${AWS_REGION:-us-east-1}"
+AWS_REGION="${AWS_REGION:-eu-west-3}"
 
 # Helper functions
 print_info() {
@@ -78,7 +78,7 @@ update_api_football_secret() {
         return 1
     fi
 
-    SECRET_NAME="${ENV}-afcon-api-football-key"
+    SECRET_NAME="${ENV}-tournament-api-football-key"
     SECRET_VALUE="{\"api_key\":\"${API_KEY}\"}"
 
     print_info "Updating secret: ${SECRET_NAME}"
@@ -109,7 +109,7 @@ update_apns_secret() {
         return 1
     fi
 
-    SECRET_NAME="${ENV}-afcon-apns"
+    SECRET_NAME="${ENV}-tournament-apns"
     SECRET_VALUE="{\"key_id\":\"${KEY_ID}\",\"team_id\":\"${TEAM_ID}\",\"topic\":\"${TOPIC}\"}"
 
     print_info "Updating secret: ${SECRET_NAME}"
@@ -139,7 +139,7 @@ update_fcm_secret() {
         return 1
     fi
 
-    SECRET_NAME="${ENV}-afcon-fcm"
+    SECRET_NAME="${ENV}-tournament-fcm"
     SECRET_VALUE="{\"server_key\":\"${FCM_KEY}\"}"
 
     print_info "Updating secret: ${SECRET_NAME}"
@@ -164,7 +164,6 @@ update_all_secrets() {
 
     update_api_football_secret "$ENV"
     update_apns_secret "$ENV"
-    update_fcm_secret "$ENV"
 
     print_header "All Secrets Updated!"
     print_success "Your secrets have been updated successfully"
@@ -182,12 +181,9 @@ update_specific_secret() {
         apns|apple)
             update_apns_secret "$ENV"
             ;;
-        fcm|firebase)
-            update_fcm_secret "$ENV"
-            ;;
         *)
             print_error "Unknown secret type: $SECRET_TYPE"
-            echo "Valid types: api-football, apns, fcm"
+            echo "Valid types: api-football, apns"
             exit 1
             ;;
     esac
