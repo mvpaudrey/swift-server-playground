@@ -158,9 +158,14 @@ public final class LiveMatchBroadcaster: Sendable {
                     update.status = convertToFixtureStatus(liveStatus)
 
                     let events = (try? await apiClient.getFixtureEvents(fixtureId: fixtureEntity.apiFixtureId)) ?? []
-                    update.recentEvents = events
-                        .sorted { ($0.time?.elapsed ?? 0) + ($0.time?.extra ?? 0) < ($1.time?.elapsed ?? 0) + ($1.time?.extra ?? 0) }
-                        .map { convertToFixtureEvent($0) }
+
+                    let sortedEvents = events.sorted { lhs, rhs in
+                        let lhsTime = (lhs.time?.elapsed ?? 0) + (lhs.time?.extra ?? 0)
+                        let rhsTime = (rhs.time?.elapsed ?? 0) + (rhs.time?.extra ?? 0)
+                        return lhsTime < rhsTime
+                    }
+                    update.recentEvents = sortedEvents.map { convertToFixtureEvent($0) }
+
                     if let latestEvent = events.last {
                         update.event = convertToFixtureEvent(latestEvent)
                     }
