@@ -225,6 +225,48 @@ public actor NotificationService {
         }
     }
 
+    // MARK: - Live Activity Trigger
+
+    /// Sends a silent push notification asking the app to start a Live Activity for this fixture.
+    /// The app is responsible for starting the ActivityKit activity and registering the push token
+    /// back with the server via the startLiveActivity gRPC call.
+    public func sendLiveActivityTriggerNotification(
+        deviceToken: String,
+        fixtureId: Int,
+        homeTeam: String,
+        awayTeam: String,
+        kickoffTimestamp: Int
+    ) async throws {
+        guard let config = apnsConfig else {
+            throw NotificationError.apnsNotConfigured
+        }
+
+        let client = try getAPNSClient()
+
+        struct TriggerPayload: Codable {
+            let type: String
+            let fixture_id: String
+            let home_team: String
+            let away_team: String
+            let kickoff_timestamp: String
+        }
+
+        let notification = APNSBackgroundNotification(
+            expiration: .immediately,
+            topic: config.topic,
+            payload: TriggerPayload(
+                type: "start_live_activity",
+                fixture_id: String(fixtureId),
+                home_team: homeTeam,
+                away_team: awayTeam,
+                kickoff_timestamp: String(kickoffTimestamp)
+            )
+        )
+
+        _ = try await client.sendBackgroundNotification(notification, deviceToken: deviceToken)
+        logger.debug("📲 Live Activity trigger sent to \(deviceToken.prefix(10))... for fixture \(fixtureId)")
+    }
+
     // MARK: - Goal Notifications
 
     public func sendGoalNotification(

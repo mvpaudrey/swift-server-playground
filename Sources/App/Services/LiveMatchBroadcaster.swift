@@ -129,65 +129,70 @@ public final class LiveMatchBroadcaster: Sendable {
                 return
             }
 
-            logger.info("📤 Sending initial state: \(todayFixtures.count) fixture(s) for league \(leagueID)")
+            logger.info("📤 Sending initial state: \(todayFixtures.count) fixture(s) for league \(leagueID) (live fetch for started/finished matches)")
 
             // Send each fixture as an update
             for fixtureEntity in todayFixtures {
-                // Determine event type based on status
-                let eventType: String
-                let statusShort = fixtureEntity.statusShort
+                let dbStatusShort = fixtureEntity.statusShort
+                let needsLiveFetch = dbStatusShort != "NS" && dbStatusShort != "TBD"
 
-                if statusShort == "FT" || statusShort == "AET" || statusShort == "PEN" {
-                    eventType = "match_finished"
-                } else if statusShort == "1H" || statusShort == "2H" || statusShort == "HT" ||
-                          statusShort == "ET" || statusShort == "BT" || statusShort == "P" {
-                    eventType = "match_live"
-                } else if statusShort == "NS" || statusShort == "TBD" {
-                    eventType = "match_scheduled"
-                } else {
-                    eventType = "status_update"
-                }
-
-                // Convert entity to update
                 var update = Afcon_LiveMatchUpdate()
                 update.fixtureID = Int32(fixtureEntity.apiFixtureId)
                 update.timestamp = Google_Protobuf_Timestamp(date: Date())
-                update.eventType = eventType
 
-                // Convert fixture entity to proto fixture
-                update.fixture = convertFixtureEntityToFixture(fixtureEntity)
+                if needsLiveFetch, let liveData = try? await apiClient.getFixtureById(fixtureId: fixtureEntity.apiFixtureId) {
+                    // Use fresh data from API for started/finished matches
+                    let liveStatus = liveData.fixture.status
+                    let statusShort = liveStatus.short
 
-                // Add status
-                var status = Afcon_FixtureStatus()
-                status.long = fixtureEntity.statusLong
-                status.short = fixtureEntity.statusShort
-                status.elapsed = Int32(fixtureEntity.statusElapsed ?? 0)
-                update.status = status
-
-                // Try to fetch and include events for live/finished matches
-                if statusShort != "NS" && statusShort != "TBD" {
-                    do {
-                        let events = try await apiClient.getFixtureEvents(fixtureId: fixtureEntity.apiFixtureId)
-                        update.recentEvents = events
-                            .sorted { (event1, event2) -> Bool in
-                                let time1 = (event1.time?.elapsed ?? 0) + (event1.time?.extra ?? 0)
-                                let time2 = (event2.time?.elapsed ?? 0) + (event2.time?.extra ?? 0)
-                                return time1 < time2
-                            }
-                            .map { convertToFixtureEvent($0) }
-
-                        if let latestEvent = events.last {
-                            update.event = convertToFixtureEvent(latestEvent)
-                        }
-                    } catch {
-                        logger.debug("⚠️ Could not fetch events for fixture \(fixtureEntity.apiFixtureId): \(error)")
+                    if statusShort == "FT" || statusShort == "AET" || statusShort == "PEN" {
+                        update.eventType = "match_finished"
+                    } else if statusShort == "1H" || statusShort == "2H" || statusShort == "HT" ||
+                              statusShort == "ET" || statusShort == "BT" || statusShort == "P" {
+                        update.eventType = "match_live"
+                    } else {
+                        update.eventType = "status_update"
                     }
+
+                    update.fixture = convertToFixture(liveData)
+                    update.status = convertToFixtureStatus(liveStatus)
+
+                    let events = (try? await apiClient.getFixtureEvents(fixtureId: fixtureEntity.apiFixtureId)) ?? []
+                    update.recentEvents = events
+                        .sorted { ($0.time?.elapsed ?? 0) + ($0.time?.extra ?? 0) < ($1.time?.elapsed ?? 0) + ($1.time?.extra ?? 0) }
+                        .map { convertToFixtureEvent($0) }
+                    if let latestEvent = events.last {
+                        update.event = convertToFixtureEvent(latestEvent)
+                    }
+
+                    logger.debug("  ✓ Sent live \(update.eventType): \(fixtureEntity.homeTeamName) vs \(fixtureEntity.awayTeamName) (\(statusShort))")
+                } else {
+                    // NS/TBD or API fetch failed — use DB data
+                    let statusShort = dbStatusShort
+
+                    if statusShort == "FT" || statusShort == "AET" || statusShort == "PEN" {
+                        update.eventType = "match_finished"
+                    } else if statusShort == "1H" || statusShort == "2H" || statusShort == "HT" ||
+                              statusShort == "ET" || statusShort == "BT" || statusShort == "P" {
+                        update.eventType = "match_live"
+                    } else if statusShort == "NS" || statusShort == "TBD" {
+                        update.eventType = "match_scheduled"
+                    } else {
+                        update.eventType = "status_update"
+                    }
+
+                    update.fixture = convertFixtureEntityToFixture(fixtureEntity)
+
+                    var status = Afcon_FixtureStatus()
+                    status.long = fixtureEntity.statusLong
+                    status.short = fixtureEntity.statusShort
+                    status.elapsed = Int32(fixtureEntity.statusElapsed ?? 0)
+                    update.status = status
+
+                    logger.debug("  ✓ Sent db \(update.eventType): \(fixtureEntity.homeTeamName) vs \(fixtureEntity.awayTeamName) (\(statusShort))")
                 }
 
-                // Send to client
                 continuation.yield(update)
-
-                logger.debug("  ✓ Sent \(eventType): \(fixtureEntity.homeTeamName) vs \(fixtureEntity.awayTeamName) (\(statusShort))")
             }
 
             logger.info("✅ Initial state sent to client for league \(leagueID)")

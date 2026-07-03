@@ -131,10 +131,11 @@ public final class LiveActivityAutoService: Sendable {
 
         logger.info("      Found \(subscriptions.count) subscription(s) for this fixture")
 
-        // Create Live Activity for each subscribed device
+        // Send trigger notification to each subscribed device so the app can
+        // start the Live Activity itself (only the app can get the ActivityKit push token)
         for subscription in subscriptions {
             do {
-                // Check if device already has a Live Activity for this fixture
+                // Skip if device already has an active Live Activity for this fixture
                 let existingActivity = try await LiveActivityEntity.query(on: db)
                     .filter(\.$device.$id == subscription.device.id!)
                     .filter(\.$fixtureId == fixtureId)
@@ -146,20 +147,23 @@ public final class LiveActivityAutoService: Sendable {
                     continue
                 }
 
-                // Create new Live Activity
-                let activityId = "auto-\(UUID().uuidString)"
-                let activity = try await notificationService.startLiveActivity(
-                    deviceUUID: subscription.device.id!,
-                    fixtureId: Int(fixtureId),
-                    activityId: activityId,
-                    pushToken: subscription.device.deviceToken,
-                    updateFrequency: "all_events"
+                guard subscription.device.platform == "ios" else {
+                    logger.debug("      ⏭️  Skipping non-iOS device for Live Activity trigger")
+                    continue
+                }
+
+                try await notificationService.sendLiveActivityTriggerNotification(
+                    deviceToken: subscription.device.deviceToken,
+                    fixtureId: fixtureId,
+                    homeTeam: fixture.homeTeamName,
+                    awayTeam: fixture.awayTeamName,
+                    kickoffTimestamp: fixture.timestamp
                 )
 
-                logger.info("      ✅ Auto-created Live Activity for device \(subscription.device.id!.uuidString) - \(fixture.homeTeamName) vs \(fixture.awayTeamName)")
+                logger.info("      ✅ Live Activity trigger sent to device \(subscription.device.id!.uuidString) - \(fixture.homeTeamName) vs \(fixture.awayTeamName)")
 
             } catch {
-                logger.error("      ❌ Failed to create Live Activity for device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
+                logger.error("      ❌ Failed to send Live Activity trigger to device \(subscription.device.id?.uuidString ?? "unknown"): \(error)")
             }
         }
 

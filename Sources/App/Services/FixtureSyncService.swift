@@ -53,7 +53,7 @@ public final class FixtureSyncService: Sendable {
         }
     }
 
-    /// Start daily fixture sync at local midnight
+    /// Start daily fixture sync at 6am (matches American tournament schedule)
     public func startDailyMidnightSync(leagues: [(id: Int, season: Int, name: String)]) {
         dailySyncTaskLock.withLock { task in
             guard task == nil else {
@@ -61,7 +61,7 @@ public final class FixtureSyncService: Sendable {
                 return
             }
 
-            logger.info("🗓️ Starting daily fixture sync at midnight")
+            logger.info("🗓️ Starting daily fixture sync at 6am")
 
             let dailyTask: Task<Void, Never> = Task.detached(priority: .background) { [weak self] in
                 await self?.dailySyncLoop(leagues: leagues)
@@ -169,16 +169,16 @@ public final class FixtureSyncService: Sendable {
         while !Task.isCancelled {
             guard let nextMidnight = calendar.nextDate(
                 after: Date(),
-                matching: DateComponents(hour: 0, minute: 0, second: 0),
+                matching: DateComponents(hour: 6, minute: 0, second: 0),
                 matchingPolicy: .nextTime
             ) else {
-                logger.error("❌ Failed to compute next midnight; retrying in 1 hour")
+                logger.error("❌ Failed to compute next 6am; retrying in 1 hour")
                 try? await Task.sleep(nanoseconds: 3_600_000_000_000)
                 continue
             }
 
             let waitSeconds = max(0, nextMidnight.timeIntervalSinceNow)
-            logger.info("⏰ Next daily fixture sync at \(nextMidnight)")
+            logger.info("⏰ Next daily fixture sync at \(nextMidnight) (6am)")
 
             do {
                 try await Task.sleep(nanoseconds: UInt64(waitSeconds * 1_000_000_000))
