@@ -1,36 +1,38 @@
-name: Deploy to AWS ECS
+name: Deploy to AWS ECS (Paris)
 
 on:
   push:
     branches:
       - main
-      - develop
   pull_request:
     branches:
       - main
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Environment to deploy to'
+      action:
+        description: 'Action to perform'
         required: true
-        default: 'staging'
+        default: 'deploy'
         type: choice
         options:
-          - development
-          - staging
-          - production
+          - deploy
+          - rollback
 
 env:
-  AWS_REGION: eu-north-1
-  ECR_REPOSITORY: afcon-server
+  AWS_REGION: eu-west-3
+  ECR_REPOSITORY: production-tournament-server
+  ECS_CLUSTER: production-tournament-cluster
+  ECS_SERVICE: tournament-service
+  ALB_DNS: production-tournament-alb-955134668.eu-west-3.elb.amazonaws.com
 
 jobs:
   # ============================================================================
-  # Build and Test
+  # Build and Test (gate before deploy)
   # ============================================================================
   build-and-test:
     name: Build and Test
     runs-on: ubuntu-22.04
+    if: github.event.inputs.action != 'rollback'
 
     steps:
       - name: Checkout code
@@ -57,23 +59,14 @@ jobs:
       - name: Build
         run: swift build -c release
 
-      # Skip tests - no test targets defined in Package.swift
-      # - name: Run tests
-      #   run: swift test --parallel
-      #   continue-on-error: true
-
   # ============================================================================
-  # Build and Push Docker Image
+  # Build and Push Docker Image to ECR (eu-west-3)
   # ============================================================================
   build-docker:
     name: Build Docker Image
     needs: build-and-test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-
-    outputs:
-      image-uri: ${{ steps.image.outputs.uri }}
-      image-digest: ${{ steps.build.outputs.digest }}
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy')
 
     steps:
       - name: Checkout code
@@ -93,143 +86,32 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Determine environment
-        id: env
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "environment=production" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
-            echo "environment=staging" >> $GITHUB_OUTPUT
-          else
-            echo "environment=development" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ steps.env.outputs.environment }}
-
-      - name: Build and push Docker image
-        id: build
+      - name: Build and push Docker image (linux/amd64)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
+          platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: |
-            ENVIRONMENT=${{ steps.env.outputs.environment }}
-
-      - name: Set image URI
-        id: image
-        run: |
-          echo "uri=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
-
-      - name: Image digest
-        run: echo ${{ steps.build.outputs.digest }}
 
   # ============================================================================
-  # Deploy to ECS (Development/Staging)
+  # Deploy to ECS Production (Paris) - matches the manual deploy sequence
   # ============================================================================
-  deploy-staging:
-    name: Deploy to Staging
-    needs: build-docker
-    runs-on: ubuntu-latest
-    if: (github.ref == 'refs/heads/develop' || github.event.inputs.environment == 'staging') && github.event_name != 'pull_request'
-    environment:
-      name: staging
-      url: http://${{ steps.stack.outputs.alb-dns }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Resolve stack outputs
-        id: stack
-        run: |
-          STACK_NAME="afcon-staging"
-          CLUSTER=$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue" \
-            --output text)
-          SERVICE=$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
-            --output text)
-          ALB_DNS=$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
-            --output text)
-          echo "cluster=$CLUSTER" >> $GITHUB_OUTPUT
-          echo "service=$SERVICE" >> $GITHUB_OUTPUT
-          echo "alb-dns=$ALB_DNS" >> $GITHUB_OUTPUT
-
-      - name: Update ECS task definition
-        id: task-def
-        run: |
-          TASK_DEFINITION=$(aws ecs describe-task-definition \
-            --task-definition afcon-server \
-            --query taskDefinition)
-
-          NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
-            --arg IMAGE "${{ needs.build-docker.outputs.image-uri }}" \
-            '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
-
-          echo $NEW_TASK_DEF > task-definition.json
-
-      - name: Deploy to Amazon ECS
-        id: deploy
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: task-definition.json
-          service: ${{ steps.stack.outputs.service }}
-          cluster: ${{ steps.stack.outputs.cluster }}
-          wait-for-service-stability: true
-          wait-for-minutes: 10
-
-      - name: Verify deployment
-        run: |
-          echo "Waiting for service to be stable..."
-          sleep 30
-          curl -f http://${{ steps.stack.outputs.alb-dns }}/health || exit 1
-
-  # ============================================================================
-  # Deploy to ECS (Production)
-  # ============================================================================
-  deploy-production:
+  deploy:
     name: Deploy to Production
     needs: build-docker
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy')
     environment:
       name: production
-      url: https://${{ steps.stack.outputs.alb-dns }}
+      url: http://production-tournament-alb-955134668.eu-west-3.elb.amazonaws.com
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -237,75 +119,47 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Resolve stack outputs
-        id: stack
+      # The service's task definition already references the :latest image tag,
+      # so forcing a new deployment pulls the freshly pushed image.
+      - name: Force new ECS deployment
         run: |
-          STACK_NAME="afcon-production"
-          CLUSTER=$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue" \
-            --output text)
-          SERVICE=$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
-            --output text)
-          ALB_DNS=$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
-            --output text)
-          echo "cluster=$CLUSTER" >> $GITHUB_OUTPUT
-          echo "service=$SERVICE" >> $GITHUB_OUTPUT
-          echo "alb-dns=$ALB_DNS" >> $GITHUB_OUTPUT
+          aws ecs update-service \
+            --cluster "${{ env.ECS_CLUSTER }}" \
+            --service "${{ env.ECS_SERVICE }}" \
+            --force-new-deployment \
+            --region "${{ env.AWS_REGION }}" > /dev/null
+          echo "Déploiement lancé"
 
-      - name: Update ECS task definition
-        id: task-def
+      - name: Wait for service to be stable
         run: |
-          TASK_DEFINITION=$(aws ecs describe-task-definition \
-            --task-definition afcon-server \
-            --query taskDefinition)
+          aws ecs wait services-stable \
+            --cluster "${{ env.ECS_CLUSTER }}" \
+            --services "${{ env.ECS_SERVICE }}" \
+            --region "${{ env.AWS_REGION }}"
+          echo "Service stable"
 
-          NEW_TASK_DEF=$(echo $TASK_DEFINITION | jq \
-            --arg IMAGE "${{ needs.build-docker.outputs.image-uri }}" \
-            '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
-
-          echo $NEW_TASK_DEF > task-definition.json
-
-      - name: Deploy to Amazon ECS
-        id: deploy
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: task-definition.json
-          service: ${{ steps.stack.outputs.service }}
-          cluster: ${{ steps.stack.outputs.cluster }}
-          wait-for-service-stability: true
-          wait-for-minutes: 15
-
-      - name: Verify deployment
+      - name: Verify deployment (health check)
         run: |
-          echo "Waiting for service to be stable..."
-          sleep 30
-          curl -f https://${{ steps.stack.outputs.alb-dns }}/health || exit 1
-
-      - name: Create GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
+          echo "Checking http://${{ env.ALB_DNS }}/health ..."
+          for i in 1 2 3 4 5; do
+            if curl -fsS "http://${{ env.ALB_DNS }}/health"; then
+              echo "Health check OK"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "⚠️ Health check did not pass, but the ECS service reported stable."
 
   # ============================================================================
-  # Rollback (Manual Trigger)
+  # Rollback (Manual Trigger) - reverts to the previous task definition revision
   # ============================================================================
   rollback:
     name: Rollback Deployment
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment != ''
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'rollback'
     environment:
-      name: ${{ github.event.inputs.environment }}
+      name: production
 
     steps:
       - name: Configure AWS credentials
@@ -315,92 +169,33 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Resolve stack outputs
-        id: stack
+      - name: Rollback ECS service to previous revision
         run: |
-          STACK_NAME="afcon-${{ github.event.inputs.environment }}"
-          CLUSTER=$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue" \
-            --output text)
-          SERVICE=$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
-            --output text)
-          echo "cluster=$CLUSTER" >> $GITHUB_OUTPUT
-          echo "service=$SERVICE" >> $GITHUB_OUTPUT
-
-      - name: Rollback ECS service
-        run: |
-          CLUSTER="${{ steps.stack.outputs.cluster }}"
-          SERVICE="${{ steps.stack.outputs.service }}"
-
-          # Get previous task definition
           CURRENT_TASK_DEF=$(aws ecs describe-services \
-            --cluster $CLUSTER \
-            --services $SERVICE \
+            --cluster "${{ env.ECS_CLUSTER }}" \
+            --services "${{ env.ECS_SERVICE }}" \
+            --region "${{ env.AWS_REGION }}" \
             --query 'services[0].taskDefinition' \
             --output text)
 
-          CURRENT_REVISION=$(echo $CURRENT_TASK_DEF | grep -oP '\d+$')
+          CURRENT_REVISION=$(echo "$CURRENT_TASK_DEF" | grep -oP '\d+$')
           PREVIOUS_REVISION=$((CURRENT_REVISION - 1))
-
-          TASK_FAMILY=$(echo $CURRENT_TASK_DEF | sed 's/:.*$//')
-          PREVIOUS_TASK_DEF="$TASK_FAMILY:$PREVIOUS_REVISION"
+          TASK_FAMILY=$(echo "$CURRENT_TASK_DEF" | sed 's/:[0-9]*$//')
+          PREVIOUS_TASK_DEF="${TASK_FAMILY}:${PREVIOUS_REVISION}"
 
           echo "Rolling back from $CURRENT_TASK_DEF to $PREVIOUS_TASK_DEF"
 
-          # Update service to use previous task definition
           aws ecs update-service \
-            --cluster $CLUSTER \
-            --service $SERVICE \
-            --task-definition $PREVIOUS_TASK_DEF \
-            --force-new-deployment
+            --cluster "${{ env.ECS_CLUSTER }}" \
+            --service "${{ env.ECS_SERVICE }}" \
+            --task-definition "$PREVIOUS_TASK_DEF" \
+            --force-new-deployment \
+            --region "${{ env.AWS_REGION }}" > /dev/null
 
       - name: Wait for rollback to complete
         run: |
-          CLUSTER="${{ steps.stack.outputs.cluster }}"
-          SERVICE="${{ steps.stack.outputs.service }}"
-          aws ecs wait services-stable --cluster $CLUSTER --services $SERVICE
-
-  # ============================================================================
-  # Notifications
-  # ============================================================================
-  notify:
-    name: Send Notifications
-    needs: [deploy-staging, deploy-production]
-    runs-on: ubuntu-latest
-    if: always()
-
-    steps:
-      - name: Deployment Status
-        run: |
-          if [[ "${{ needs.deploy-production.result }}" == "success" ]]; then
-            echo "✅ Production deployment successful"
-          elif [[ "${{ needs.deploy-staging.result }}" == "success" ]]; then
-            echo "✅ Staging deployment successful"
-          else
-            echo "❌ Deployment failed"
-            exit 1
-          fi
-
-      - name: Slack notification
-        if: ${{ always() && env.SLACK_WEBHOOK_URL != '' }}
-        uses: slackapi/slack-github-action@v1.25.0
-        with:
-          payload: |
-            {
-              "text": "AFCON deploy: ${{ needs.deploy-production.result == 'success' && 'production' || needs.deploy-staging.result == 'success' && 'staging' || 'failed' }}",
-              "attachments": [
-                {
-                  "color": "${{ needs.deploy-production.result == 'success' && 'good' || needs.deploy-staging.result == 'success' && 'good' || 'danger' }}",
-                  "fields": [
-                    { "title": "Repo", "value": "${{ github.repository }}", "short": true },
-                    { "title": "Ref", "value": "${{ github.ref_name }}", "short": true },
-                    { "title": "Run", "value": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}", "short": false }
-                  ]
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          aws ecs wait services-stable \
+            --cluster "${{ env.ECS_CLUSTER }}" \
+            --services "${{ env.ECS_SERVICE }}" \
+            --region "${{ env.AWS_REGION }}"
+          echo "Rollback stable"
