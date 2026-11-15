@@ -3,6 +3,12 @@
 End-to-end Swift demo: local Vapor/gRPC server → real API-Football data for **league 920**
 (FIFA U-20 Women's World Cup, season **2026**) → iOS app over the real gRPC stream.
 
+> **Another league?** The examples use league 920 (talk of 2026-09-08). To reuse this runbook,
+> change the league in three places: the server `.env` (`INIT_LEAGUES`, `DEMO_LEAGUE_ID`,
+> `DEMO_SEASON`), the iOS `Demo/DemoTournamentConfig.swift` (`leagueId`, `season`,
+> `competitionName`), and the ids in the `curl` / `grpcurl` commands. The fixture table below
+> is specific to the 2026-09-08 talk.
+
 - Season 2026 window: **2026-09-05 → 2026-09-13** (events + lineups covered).
 - Talk day **2026-09-08** fixtures (UTC):
   | kickoff | fixture id | match |
@@ -105,31 +111,40 @@ grpcurl -plaintext -import-path Protos -proto afcon.proto \
 
 ---
 
-## 3. iOS app → local server  — already wired to the **FWC2026** scheme
+## 3. iOS app → local server — the **Demo** target
 
-For the talk the FWC2026 scheme has been repurposed to the U-20 WWC demo. Just pick the
-**FWC2026** scheme in Xcode and Run on the simulator — fixtures / standings / live scores
-come from `localhost:50051` for league 920.
+The demo runs in its own app target, **`Demo`** (iOS repo `AFCONApp/AFCONiOSApp`, branch
+`feat/demo-target`): separate bundle ID (`com.cheulah.halftimefootball.Demo`), no widget, no push,
+in-memory SwiftData store. The `FWC2026` and `AFCON2025` targets are not touched for a demo, so
+there is nothing to revert afterwards.
 
-What was changed (all revert together after the talk — grep `DEMO`):
-- **new** `AFCONApp/AFCONiOSApp/FWC2026/Config/U20WWCTournamentConfig.swift` (leagueId 920,
-  season 2026). Auto-included in the FWC2026 target (filesystem-synchronized group).
-  Its `teamFlagMap` covers **all 24** nations (U-20 API team ids → FIFA codes).
-- **new flag SVGs** in `FWC2026/Assets.xcassets/Teams/`: `TAN` `BEN` `NGA` copied from the
-  AFCON2025 catalog; `POL` `CHN` `CRC` `ITA` `PRK` `NCL` hand-authored (flag-icons style,
-  640×480). NCL is the Kanaky/FLNKS flag.
-- `FWC2026/FWC2026App.swift` — 3 refs swapped `FWCTournamentConfig()` → `U20WWCTournamentConfig()`.
-- `AFCON2025.xcodeproj/.../FWC2026.xcscheme` — `LaunchAction` now sets
-  `AFCON_API_HOST=localhost` / `AFCON_API_PORT=50051`.
-- `AFCONClient` / `TournamentServiceWrapper` — `getLiveFixtures` takes a `season` (was
-  hardcoded 2025).
+### One-time setup
+- *Demo ▸ Signing & Capabilities*: add the App Group `group.com.cheulah.demo` (the config uses it).
+- Set the league in `Demo/DemoTournamentConfig.swift` (`leagueId`, `season`, `competitionName`).
+  It must match the league the local server was started with.
+- Flags: `teamFlagMap` is empty by default. Fill it (API team id → FIFA code) and add the flag
+  assets to `Demo/Assets.xcassets` if you want them on screen.
 
-> Not touched: the `AFCON2025` target, `FWCTournamentConfig.swift`, `AFCON2025.xcscheme`.
+### Run
+Pick the **Demo** scheme and Run on the simulator. Fixtures / standings / live scores come from
+`localhost:50051`.
 
-### To restore FIFA World Cup 2026
-Revert the 3 lines in `FWC2026App.swift`, delete the two `<EnvironmentVariable>` entries
-in `FWC2026.xcscheme` (or untick them in Edit Scheme), optionally delete
-`U20WWCTournamentConfig.swift`.
+### Why it can't reach production
+- At launch `DemoApp` calls `TournamentServiceWrapper.useServer(host:port:)` (`localhost:50051`).
+  It is the first stored property of the app, so it runs before any other service is created.
+- It does **not** depend on scheme environment variables: relaunching the app from the simulator
+  home screen still talks to the local server.
+- `precondition` — the app crashes at launch if the host contains `amazonaws.com`.
+- `AFCON_API_HOST` / `AFCON_API_PORT` are still honoured, to reach the Mac from a physical device
+  (use its LAN address; iOS will ask for local-network permission).
+
+> **History.** A U-20 build once reached the production server and left a league-920 notification
+> subscription there (removed in Nov 2026). Most likely the app was relaunched from the home
+> screen, without the scheme's `AFCON_API_HOST=localhost`. The dedicated target removes that
+> failure mode.
+
+The `/demo/*` endpoints exist only on the `demo/can2025-talk` branch of this repo — never deploy
+that branch.
 
 ---
 
@@ -137,7 +152,7 @@ in `FWC2026.xcscheme` (or untick them in Edit Scheme), optionally delete
 
 1. `docker compose up -d postgres` → `swift run Run`, wait for the 4 startup lines.
 2. `curl localhost:8080/health` and the `grpcurl GetFixtures` check.
-3. Launch the app (FWC2026 scheme, env vars set). Confirm the U-20 WWC schedule loads.
+3. Launch the app (**Demo** scheme). Confirm the schedule of the demo league loads.
 4. Open a live match → keep the `grpcurl StreamLiveMatches` terminal visible.
 5. `curl -XPOST localhost:8080/demo/reset`, then fire `goal` / `card` / `var` and watch
    the app + stream update together.
