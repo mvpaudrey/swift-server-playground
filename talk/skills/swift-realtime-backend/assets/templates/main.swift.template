@@ -1,0 +1,39 @@
+import App
+import Vapor
+
+/// Runs the HTTP server (Vapor) and the gRPC server as sibling structured
+/// tasks in one process. Neither one is "the real server with the other
+/// bolted on" — they're peers, and if either throws, the task group tears
+/// both down instead of leaving a half-running process.
+@main
+struct Entrypoint {
+    static func main() async throws {
+        var env = try Environment.detect()
+        try LoggingSystem.bootstrap(from: &env)
+        let app = try await Application.make(env)
+
+        do {
+            try await configure(app)
+        } catch {
+            app.logger.report(error: error)
+            try? await app.asyncShutdown()
+            throw error
+        }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { try await app.execute() }
+            group.addTask {
+                // TODO once you've generated Swift types from your .proto
+                // (see README.md "Next steps"): construct a GRPCServer here
+                // with your generated service provider, mirroring how
+                // `app.execute()` above runs Vapor. Until then this task is
+                // a no-op so the scaffold builds and runs immediately.
+                app.logger.info("gRPC server not wired up yet — see README.md")
+            }
+            try await group.next()
+            group.cancelAll()
+        }
+
+        try await app.asyncShutdown()
+    }
+}

@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package {{ENTITY_LOWER}}service;
+
+// This is the shared contract between your server and every Swift client
+// (iOS, macOS, another server). Generate Swift types from this file with
+// protoc + the grpc-swift plugin (see README.md "Next steps") and both
+// sides get identical, type-safe models — no hand-written DTOs to keep
+// in sync.
+
+service {{ENTITY}}Service {
+  // Server-streaming RPC: the client opens one call and receives updates
+  // for as long as it stays connected. This is what the adaptive poller
+  // and broadcaster in Sources/App/Services feed.
+  rpc Stream{{ENTITY_PLURAL}}(Stream{{ENTITY_PLURAL}}Request) returns (stream {{ENTITY}}Update);
+
+  // A plain request/response RPC for the current snapshot, useful for a
+  // client that just reconnected and needs to catch up before subscribing.
+  rpc Get{{ENTITY}}(Get{{ENTITY}}Request) returns ({{ENTITY}});
+}
+
+message Stream{{ENTITY_PLURAL}}Request {
+  string channel_id = 1; // e.g. a specific {{ENTITY_LOWER}} id, or "all"
+}
+
+message Get{{ENTITY}}Request {
+  string id = 1;
+}
+
+message {{ENTITY}} {
+  string id = 1;
+  string status = 2;       // domain-specific status string, e.g. "active", "closed"
+  int64 updated_at_unix = 3;
+  // Add your domain fields here (amounts, coordinates, scores, whatever
+  // this {{ENTITY_LOWER}} represents).
+}
+
+message {{ENTITY}}Update {
+  string event_type = 1;   // e.g. "created", "status_changed", "closed"
+  {{ENTITY}} {{ENTITY_LOWER}} = 2;
+  repeated {{ENTITY}}EventSummary recent_events = 3; // rolling window, helps clients resync after a reconnect
+}
+
+message {{ENTITY}}EventSummary {
+  string event_type = 1;
+  int64 occurred_at_unix = 2;
+}

@@ -1,0 +1,57 @@
+import Testing
+import Foundation
+@testable import App
+
+struct Stub{{ENTITY}}Source: {{ENTITY}}Source {
+    var active = false
+    var next: Date?
+    func isActive(channelID: String) async throws -> Bool { active }
+    func nextKnownEvent(channelID: String) async throws -> Date? { next }
+    func fetchUpdates(channelID: String) async throws -> [{{ENTITY}}Update] { [] }
+}
+
+@Test func cacheReturnsValueBeforeExpiry() async throws {
+    let cache = CacheService()
+    await cache.set("k", value: 42, ttl: 60)
+    let value = await cache.get("k", as: Int.self)
+    #expect(value == 42)
+}
+
+@Test func cacheExpiresAfterTTL() async throws {
+    let cache = CacheService()
+    await cache.set("k", value: 42, ttl: -1) // already expired
+    let value = await cache.get("k", as: Int.self)
+    #expect(value == nil)
+}
+
+@Test func pollerUsesActiveIntervalWhenSourceIsActive() async throws {
+    let source = Stub{{ENTITY}}Source(active: true, next: nil)
+    let interval = try await AdaptivePoller.nextSleepInterval(
+        channelID: "x", source: source, intervals: .init()
+    )
+    #expect(interval == AdaptivePoller.Intervals().active)
+}
+
+@Test func pollerUsesIdleIntervalWhenNothingScheduled() async throws {
+    let source = Stub{{ENTITY}}Source(active: false, next: nil)
+    let interval = try await AdaptivePoller.nextSleepInterval(
+        channelID: "x", source: source, intervals: .init()
+    )
+    #expect(interval == AdaptivePoller.Intervals().idle)
+}
+
+@Test func pollerScalesDownAsEventApproaches() async throws {
+    let source = Stub{{ENTITY}}Source(active: false, next: Date().addingTimeInterval(3 * 60 * 60))
+    let interval = try await AdaptivePoller.nextSleepInterval(
+        channelID: "x", source: source, intervals: .init()
+    )
+    #expect(interval == AdaptivePoller.Intervals().approaching)
+}
+
+@Test func pollerUsesClosingIntervalWithinTheHour() async throws {
+    let source = Stub{{ENTITY}}Source(active: false, next: Date().addingTimeInterval(45 * 60))
+    let interval = try await AdaptivePoller.nextSleepInterval(
+        channelID: "x", source: source, intervals: .init()
+    )
+    #expect(interval == AdaptivePoller.Intervals().closingIn)
+}

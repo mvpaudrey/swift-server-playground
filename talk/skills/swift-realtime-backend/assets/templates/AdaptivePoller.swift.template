@@ -1,0 +1,123 @@
+import Foundation
+
+/// Implement this against whatever upstream you're polling (a REST API, a
+/// database, a sensor gateway...). The poller only needs to know: is this
+/// channel "hot" right now, when's the next thing worth waking up early
+/// for, and what changed since last time.
+public protocol {{ENTITY}}Source: Sendable {
+    /// True while the resource is in a state that deserves fast polling
+    /// (e.g. an order is being fulfilled right now, a match is in play).
+    func isActive(channelID: String) async throws -> Bool
+
+    /// The next known timestamp worth polling around (a scheduled start
+    /// time, a delivery window, a maintenance window). Return `nil` if
+    /// there's nothing scheduled — the poller falls back to its idle interval.
+    func nextKnownEvent(channelID: String) async throws -> Date?
+
+    /// Fetch the current state and return updates since the last poll.
+    /// Return an empty array if nothing changed.
+    func fetchUpdates(channelID: String) async throws -> [{{ENTITY}}Update]
+}
+
+/// Polls an upstream source at an interval that scales with how close (or
+/// how far) the channel is from being "hot", instead of hammering it at a
+/// fixed rate 24/7. A production version of this pattern polled every 15
+/// seconds while a resource was active, and paced out to a 24-hour check
+/// when nothing was scheduled at all — roughly a 5,000x dynamic range,
+/// which is the difference between a manageable API bill and getting
+/// rate-limited.
+///
+/// Tune the thresholds below to your domain: the shape (fast when close/
+/// active, slow when far/idle) matters more than the exact numbers.
+public actor AdaptivePoller {
+    public struct Intervals: Sendable {
+        public var active: TimeInterval
+        public var closingIn: TimeInterval    // < 1h until next event
+        public var approaching: TimeInterval  // 1h - 6h until next event
+        public var scheduled: TimeInterval    // 6h - 24h until next event
+        public var farOut: TimeInterval       // > 24h until next event
+        public var idle: TimeInterval         // nothing scheduled at all
+
+        public init(
+            active: TimeInterval = 15,
+            closingIn: TimeInterval = 15,
+            approaching: TimeInterval = 30 * 60,
+            scheduled: TimeInterval = 3 * 60 * 60,
+            farOut: TimeInterval = 12 * 60 * 60,
+            idle: TimeInterval = 24 * 60 * 60
+        ) {
+            self.active = active
+            self.closingIn = closingIn
+            self.approaching = approaching
+            self.scheduled = scheduled
+            self.farOut = farOut
+            self.idle = idle
+        }
+    }
+
+    private let source: any {{ENTITY}}Source
+    private let broadcaster: {{ENTITY}}Broadcaster
+    private let intervals: Intervals
+    private var runningTasks: [String: Task<Void, Never>] = [:]
+
+    public init(source: any {{ENTITY}}Source, broadcaster: {{ENTITY}}Broadcaster, intervals: Intervals = Intervals()) {
+        self.source = source
+        self.broadcaster = broadcaster
+        self.intervals = intervals
+    }
+
+    /// Starts an independent poll loop for `channelID` as a background task.
+    /// One `AdaptivePoller` instance can track many channels at once, each
+    /// on its own loop and its own interval — calling `start` again for a
+    /// channel that's already running is a no-op, but a *different*
+    /// `channelID` gets its own task. Call `stop(channelID:)` to cancel one,
+    /// or `stopAll()` to tear all of them down (e.g. on shutdown).
+    public func start(channelID: String) {
+        guard runningTasks[channelID] == nil else { return }
+        runningTasks[channelID] = Task { [intervals, source, broadcaster] in
+            while !Task.isCancelled {
+                do {
+                    let updates = try await source.fetchUpdates(channelID: channelID)
+                    for update in updates {
+                        await broadcaster.broadcast(update)
+                    }
+                    let sleepInterval = try await Self.nextSleepInterval(
+                        channelID: channelID, source: source, intervals: intervals
+                    )
+                    try await Task.sleep(nanoseconds: UInt64(sleepInterval * 1_000_000_000))
+                } catch {
+                    // Back off on error instead of hot-looping against a failing upstream.
+                    try? await Task.sleep(nanoseconds: UInt64(intervals.approaching * 1_000_000_000))
+                }
+            }
+        }
+    }
+
+    public func stop(channelID: String) {
+        runningTasks[channelID]?.cancel()
+        runningTasks[channelID] = nil
+    }
+
+    public func stopAll() {
+        for task in runningTasks.values { task.cancel() }
+        runningTasks.removeAll()
+    }
+
+    static func nextSleepInterval(
+        channelID: String, source: any {{ENTITY}}Source, intervals: Intervals
+    ) async throws -> TimeInterval {
+        if try await source.isActive(channelID: channelID) {
+            return intervals.active
+        }
+        guard let next = try await source.nextKnownEvent(channelID: channelID) else {
+            return intervals.idle
+        }
+        let secondsAway = next.timeIntervalSinceNow
+        switch secondsAway {
+        case ..<0, 0..<3600: return intervals.closingIn        // already started or <1h away
+        case 3600..<(6 * 3600): return intervals.approaching   // 1h-6h away
+        case (6 * 3600)..<(24 * 3600): return intervals.scheduled // 6h-24h away
+        default: return intervals.farOut                        // >24h away
+        }
+    }
+}

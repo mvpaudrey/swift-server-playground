@@ -62,3 +62,6 @@ xcuserdata/
 
 # Local server PID files
 .server*.pid
+
+# Evaluation workspaces of the talk skills (generated, ~10 GB)
+talk/skills/*-workspace/

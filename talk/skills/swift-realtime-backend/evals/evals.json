@@ -1,0 +1,53 @@
+{
+  "skill_name": "swift-realtime-backend",
+  "evals": [
+    {
+      "id": 1,
+      "eval_name": "delivery-tracking",
+      "prompt": "Je fais une app de livraison en Swift, je veux un backend qui pousse le statut du colis en live vers l'app iOS pendant que le livreur se déplace, sans spammer l'API du transporteur en continu.",
+      "expected_output": "A Swift package (Vapor + grpc-swift) with a shared .proto contract for package/delivery status, an adaptive poller that slows down when no delivery is in transit and speeds up when one is active, an actor-based cache, and an AsyncStream broadcaster for pushing live status to iOS clients. Should build successfully.",
+      "files": [],
+      "assertions": [
+        "Package.swift declares dependencies on vapor and on grpc-swift (grpc-swift-nio-transport, grpc-swift-protobuf, swift-protobuf)",
+        "A .proto file exists defining a server-streaming RPC (a 'stream' response) relevant to package/delivery status",
+        "An actor-isolated cache type exists with a per-key TTL/expiry mechanism",
+        "A pub/sub broadcaster type exists using AsyncStream to fan out updates to multiple subscribers",
+        "An adaptive/variable-interval polling mechanism exists (not a single fixed sleep duration) that scales based on whether a delivery is active vs idle",
+        "The generated Swift package builds successfully with `swift build`",
+        "No literal '{{' template placeholders remain in any generated file"
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "iot-sensors",
+      "prompt": "J'ai des capteurs de température connectés, je veux un serveur Vapor qui les interroge et pousse les relevés en live vers un dashboard, sans polling constant quand rien ne bouge.",
+      "expected_output": "A Swift package (Vapor + grpc-swift) with a shared .proto contract for sensor readings, an adaptive poller that scales interval based on sensor activity, an actor-based cache, and an AsyncStream broadcaster for pushing live readings to dashboard clients. Should build successfully.",
+      "files": [],
+      "assertions": [
+        "Package.swift declares dependencies on vapor and on grpc-swift (grpc-swift-nio-transport, grpc-swift-protobuf, swift-protobuf)",
+        "A .proto file exists defining a server-streaming RPC (a 'stream' response) relevant to sensor readings",
+        "An actor-isolated cache type exists with a per-key TTL/expiry mechanism",
+        "A pub/sub broadcaster type exists using AsyncStream to fan out updates to multiple subscribers",
+        "An adaptive/variable-interval polling mechanism exists (not a single fixed sleep duration) that scales based on sensor activity",
+        "The generated Swift package builds successfully with `swift build`",
+        "No literal '{{' template placeholders remain in any generated file"
+      ]
+    },
+    {
+      "id": 3,
+      "eval_name": "crypto-price-alerts",
+      "prompt": "Build me a Vapor server that streams live crypto price alerts to connected Swift clients, polling an exchange API.",
+      "expected_output": "A Swift package (Vapor + grpc-swift) with a shared .proto contract for price alerts, an adaptive poller that scales interval based on price volatility/activity, an actor-based cache, and an AsyncStream broadcaster for pushing live alerts to connected clients. Should build successfully.",
+      "files": [],
+      "assertions": [
+        "Package.swift declares dependencies on vapor and on grpc-swift (grpc-swift-nio-transport, grpc-swift-protobuf, swift-protobuf)",
+        "A .proto file exists defining a server-streaming RPC (a 'stream' response) relevant to price alerts",
+        "An actor-isolated cache type exists with a per-key TTL/expiry mechanism",
+        "A pub/sub broadcaster type exists using AsyncStream to fan out updates to multiple subscribers",
+        "An adaptive/variable-interval polling mechanism exists (not a single fixed sleep duration) that scales based on market activity",
+        "The generated Swift package builds successfully with `swift build`",
+        "No literal '{{' template placeholders remain in any generated file"
+      ]
+    }
+  ]
+}

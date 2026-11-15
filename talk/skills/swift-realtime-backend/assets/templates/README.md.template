@@ -1,0 +1,51 @@
+# {{PROJECT_NAME}}
+
+A real-time Swift backend scaffold: a shared gRPC/Protobuf contract, an
+adaptive poller, an actor-based TTL cache, and an `AsyncStream` broadcaster.
+See `Sources/App/Services/` for the four pieces and the comments in each
+file for why they're shaped the way they are.
+
+## Run it
+
+```bash
+swift build
+swift run Run
+```
+
+`GET /health` should respond `ok`. The gRPC server task logs a "not wired
+up yet" message until you complete the codegen step below — everything else
+(cache, broadcaster, poller) is real, working Swift you can already read,
+test, and modify.
+
+## Next steps
+
+1. **Fill in `Sources/App/Protos/{{ENTITY_LOWER}}.proto`** with your actual
+   domain fields (it currently has a minimal `id`/`status`/`updated_at`
+   shape as a starting point).
+2. **Generate Swift types from it.** Install `protoc` and the grpc-swift
+   plugin (`brew install swift-protobuf grpc-swift`, or see
+   https://github.com/grpc/grpc-swift for the current recommended setup —
+   grpc-swift 2.x favors a build-time SwiftPM plugin over manual codegen,
+   check their docs for the latest approach), then generate the message and
+   service types.
+3. **Implement the generated service protocol**, delegating to the
+   `{{ENTITY}}Broadcaster` already in this scaffold for the streaming RPC —
+   `broadcaster.subscribe(channelID:)` gives you an `AsyncStream` to `yield`
+   straight into the gRPC response stream.
+4. **Replace `Example{{ENTITY}}Source`** in `configure.swift` with a real
+   implementation of `{{ENTITY}}Source` that talks to your actual upstream
+   (API, database, device gateway...). The three methods
+   (`isActive`/`nextKnownEvent`/`fetchUpdates`) are the only surface the
+   poller depends on.
+5. **Wire the real `GRPCServer`** into `Sources/Run/main.swift` where the
+   `TODO` comment is, passing your generated service provider.
+6. **Tune `AdaptivePoller.Intervals`** in `configure.swift` to your domain
+   — how fast is "active", how far out does "scheduled" start mattering.
+
+## Why these four pieces
+
+See `references/patterns.md` in the skill this scaffold came from
+(`swift-realtime-backend`) for the reasoning behind each pattern — actor
+isolation for shared mutable state, `AsyncStream` per subscriber instead of
+a message broker, the adaptive-interval formula, and running HTTP + gRPC as
+sibling structured tasks.

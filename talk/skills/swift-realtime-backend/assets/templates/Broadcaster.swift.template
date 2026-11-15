@@ -1,0 +1,62 @@
+import Foundation
+
+/// A generic update pushed to subscribers. Once you've generated Swift types
+/// from your `.proto` (see README.md), replace this with your real
+/// `{{ENTITY}}Update` message — the actor below doesn't care what `Payload`
+/// is, so the swap is mechanical.
+public struct {{ENTITY}}Update: Sendable {
+    public let eventType: String
+    public let channelID: String
+    public let payload: [String: String]
+    public let timestamp: Date
+
+    public init(eventType: String, channelID: String, payload: [String: String], timestamp: Date = Date()) {
+        self.eventType = eventType
+        self.channelID = channelID
+        self.payload = payload
+        self.timestamp = timestamp
+    }
+}
+
+/// Fans out updates to every subscriber interested in a channel, using one
+/// `AsyncStream` per subscriber. This is the Swift-native alternative to a
+/// message broker for the common case of "N clients, all reading the same
+/// live feed, from a single process": no external pub/sub system, no
+/// serialization format to agree on beyond your own Swift types.
+///
+/// Each subscriber gets its own stream so a slow or disconnected client
+/// can't block delivery to the others — `AsyncStream.Continuation` buffers
+/// independently per stream.
+public actor {{ENTITY}}Broadcaster {
+    private var continuations: [UUID: (channelID: String, continuation: AsyncStream<{{ENTITY}}Update>.Continuation)] = [:]
+
+    public init() {}
+
+    /// Called by your gRPC service implementation when a client opens
+    /// `Stream{{ENTITY_PLURAL}}`. Iterate the returned stream and `yield` each
+    /// element back to the gRPC response stream.
+    public func subscribe(channelID: String) -> AsyncStream<{{ENTITY}}Update> {
+        let id = UUID()
+        return AsyncStream { continuation in
+            continuations[id] = (channelID, continuation)
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.removeSubscriber(id) }
+            }
+        }
+    }
+
+    /// Called by the poller (see AdaptivePoller.swift) whenever it detects a
+    /// change. Delivers to every subscriber on `channelID`, plus anyone
+    /// subscribed to `"all"`.
+    public func broadcast(_ update: {{ENTITY}}Update) {
+        for (_, entry) in continuations where entry.channelID == update.channelID || entry.channelID == "all" {
+            entry.continuation.yield(update)
+        }
+    }
+
+    private func removeSubscriber(_ id: UUID) {
+        continuations[id] = nil
+    }
+
+    public var subscriberCount: Int { continuations.count }
+}

@@ -1,0 +1,44 @@
+import Foundation
+import Vapor
+
+/// Wires the three building blocks together and stores them on `Application`
+/// so both your HTTP routes and your (yet-to-be-implemented) gRPC service
+/// provider can reach them.
+public func configure(_ app: Application) async throws {
+    let cache = CacheService()
+    let broadcaster = {{ENTITY}}Broadcaster()
+
+    // Swap `Example{{ENTITY}}Source` for a type that talks to your real
+    // upstream (a REST API, a database, a device gateway...).
+    let source = Example{{ENTITY}}Source()
+    let poller = AdaptivePoller(source: source, broadcaster: broadcaster)
+
+    app.storage[CacheServiceKey.self] = cache
+    app.storage[{{ENTITY}}BroadcasterKey.self] = broadcaster
+    app.storage[AdaptivePollerKey.self] = poller
+
+    // Start polling whatever channels matter at boot. In a real service this
+    // list usually comes from config or a "known active resources" query.
+    await poller.start(channelID: "all")
+
+    app.get("health") { _ in "ok" }
+}
+
+private struct CacheServiceKey: StorageKey { typealias Value = CacheService }
+private struct {{ENTITY}}BroadcasterKey: StorageKey { typealias Value = {{ENTITY}}Broadcaster }
+private struct AdaptivePollerKey: StorageKey { typealias Value = AdaptivePoller }
+
+extension Application {
+    public var cache: CacheService { storage[CacheServiceKey.self]! }
+    public var {{ENTITY_LOWER}}Broadcaster: {{ENTITY}}Broadcaster { storage[{{ENTITY}}BroadcasterKey.self]! }
+    public var {{ENTITY_LOWER}}Poller: AdaptivePoller { storage[AdaptivePollerKey.self]! }
+}
+
+/// A placeholder upstream so the scaffold builds and runs out of the box.
+/// Replace with a real implementation of `{{ENTITY}}Source` — the protocol
+/// is defined in `AdaptivePoller.swift`.
+struct Example{{ENTITY}}Source: {{ENTITY}}Source {
+    func isActive(channelID: String) async throws -> Bool { false }
+    func nextKnownEvent(channelID: String) async throws -> Date? { nil }
+    func fetchUpdates(channelID: String) async throws -> [{{ENTITY}}Update] { [] }
+}

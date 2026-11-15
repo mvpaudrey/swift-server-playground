@@ -1,0 +1,60 @@
+import Foundation
+
+/// An in-memory cache with a per-key time-to-live, isolated as an actor so
+/// concurrent readers/writers from HTTP handlers, the gRPC service, and the
+/// background poller can never race on the same dictionary.
+///
+/// This is deliberately not backed by Redis or another external store: for
+/// most real-time services the working set is small (whatever is currently
+/// "live") and an in-process cache removes a network hop and an ops
+/// dependency. Swap in a distributed cache later if you outgrow a single
+/// instance — the actor's public API (`get`/`set`/`invalidate`) stays the
+/// same either way, so callers don't need to change.
+public actor CacheService {
+    private struct Entry {
+        let value: Any
+        let expiresAt: Date
+    }
+
+    private var storage: [String: Entry] = [:]
+
+    public init() {}
+
+    /// Returns the cached value for `key` if present and not expired.
+    public func get<T>(_ key: String, as type: T.Type = T.self) -> T? {
+        guard let entry = storage[key], entry.expiresAt > Date() else {
+            storage[key] = nil
+            return nil
+        }
+        return entry.value as? T
+    }
+
+    /// Stores `value` under `key` for `ttl` seconds.
+    public func set(_ key: String, value: some Any, ttl: TimeInterval) {
+        storage[key] = Entry(value: value, expiresAt: Date().addingTimeInterval(ttl))
+    }
+
+    public func invalidate(_ key: String) {
+        storage[key] = nil
+    }
+
+    /// Fetches from cache, or calls `resolve` on a miss and caches the result.
+    /// This is the shape you'll use most often: `cache.getOrSet("standings:\(id)", ttl: 3600) { try await fetchStandings(id) }`.
+    public func getOrSet<T>(_ key: String, ttl: TimeInterval, resolve: () async throws -> T) async rethrows -> T {
+        if let cached: T = get(key) {
+            return cached
+        }
+        let value = try await resolve()
+        set(key, value: value, ttl: ttl)
+        return value
+    }
+}
+
+// MARK: - Suggested TTL tiers
+//
+// Pick TTLs based on how fast each piece of data actually changes, not a
+// single global number. A real deployment of this pattern used tiers like:
+//   - reference data (leagues, teams, catalog entries): hours
+//   - aggregates that only change on specific events (standings): 1h idle / few min live
+//   - the "live" resource itself while active: tens of seconds
+//   - a single detail lookup right after a write: tens of seconds, to absorb bursts
