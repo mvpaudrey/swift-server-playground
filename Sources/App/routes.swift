@@ -507,5 +507,50 @@ public func routes(_ app: Application) throws {
         )
     }
 
+    // MARK: - Conference-Talk Demo Endpoints
+    //
+    // One-click synthetic live events for the live demo. Safe: in-memory only, never
+    // touches API-Football, AWS, Postgres writes, or real APNs.
+    //   curl -XPOST localhost:8080/demo/trigger/goal
+    //   curl -XPOST localhost:8080/demo/trigger/goal -d '{"team":"away","minute":63,"player":"Doe"}' -H 'content-type: application/json'
+    //   curl -XPOST localhost:8080/demo/reset
+
+    let demoLeagueID = Environment.get("DEMO_LEAGUE_ID").flatMap(Int.init)
+        ?? Environment.get("INIT_LEAGUES")
+            .flatMap { $0.split(separator: ",").first }
+            .flatMap { $0.split(separator: ":").first }
+            .flatMap { Int($0) }
+        ?? 920
+    let demoSeason = Environment.get("DEMO_SEASON").flatMap(Int.init) ?? 2026
+
+    struct DemoTriggerBody: Content {
+        var fixtureId: Int?
+        var team: String?
+        var minute: Int?
+        var player: String?
+    }
+
+    app.post("demo", "trigger", ":kind") { req async throws -> LiveMatchBroadcaster.DemoOutcome in
+        let kind = req.parameters.get("kind") ?? "goal"
+        let body = (try? req.content.decode(DemoTriggerBody.self)) ?? DemoTriggerBody()
+        let broadcaster: LiveMatchBroadcaster = req.getService()
+        return try await broadcaster.demoTrigger(
+            leagueID: demoLeagueID,
+            season: demoSeason,
+            kind: kind,
+            fixtureID: body.fixtureId,
+            team: body.team ?? "home",
+            minute: body.minute,
+            player: body.player
+        )
+    }
+
+    app.post("demo", "reset") { req async throws -> [String: String] in
+        let broadcaster: LiveMatchBroadcaster = req.getService()
+        let fixtureId = try? req.content.decode(DemoTriggerBody.self).fixtureId
+        await broadcaster.demoReset(leagueID: demoLeagueID, fixtureID: fixtureId)
+        return ["status": "reset", "league": "\(demoLeagueID)", "season": "\(demoSeason)"]
+    }
+
     app.logger.info("✅ HTTP routes configured")
 }

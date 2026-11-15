@@ -20,6 +20,9 @@ public final class LiveMatchBroadcaster: Sendable {
     // Track previous state for change detection
     private let fixtureStateLock = Mutex<[Int: [Int: FixtureState]]>([:])
 
+    // In-memory synthetic match state for the conference-talk demo (see demoTrigger).
+    private let demoStateLock = Mutex<[Int: DemoMatchState]>([:])
+
     public init(
         apiClient: APIFootballClient,
         fixtureRepository: FixtureRepository,
@@ -1026,9 +1029,185 @@ public final class LiveMatchBroadcaster: Sendable {
 
         return fixture
     }
+
+    // MARK: - Conference-Talk Demo Simulation
+    //
+    // Injects a synthetic live event (goal / card / substitution / VAR) into the *real*
+    // gRPC broadcast path so the presenter has a guaranteed "money shot" if no real event
+    // happens during the demo window. The iOS client receives an ordinary
+    // `Afcon_LiveMatchUpdate` — identical to a real one. Never calls API-Football or writes
+    // to the database; demo score/events live only in memory and reset on `demoReset`.
+
+    /// Result of a demo trigger, returned to the HTTP caller (the deck / a curl button).
+    public struct DemoOutcome: Content {
+        public let fixtureID: Int
+        public let homeTeam: String
+        public let awayTeam: String
+        public let homeScore: Int
+        public let awayScore: Int
+        public let minute: Int
+        public let eventType: String
+        public let detail: String
+        public let subscribersNotified: Int
+    }
+
+    /// Reset synthetic demo state (0-0, no events) and tell connected clients to drop the
+    /// affected fixture(s) from their live list. Call between rehearsals.
+    public func demoReset(leagueID: Int, fixtureID: Int? = nil) async {
+        let clearedFixtureIDs: [Int] = demoStateLock.withLock { states in
+            let ids = fixtureID.map { [$0] } ?? Array(states.keys)
+            if let fixtureID {
+                states.removeValue(forKey: fixtureID)
+            } else {
+                states.removeAll()
+            }
+            return ids
+        }
+
+        for fid in clearedFixtureIDs {
+            var update = Afcon_LiveMatchUpdate()
+            update.fixtureID = Int32(fid)
+            update.timestamp = Google_Protobuf_Timestamp(date: Date())
+            update.eventType = "demo_reset"
+            if let entity = try? await fixtureRepository.getFixture(byApiId: fid) {
+                update.fixture = convertFixtureEntityToFixture(entity)
+            }
+            await broadcast(updates: [update], to: leagueID)
+        }
+
+        logger.info("🎬 DEMO state reset\(fixtureID.map { " for fixture \($0)" } ?? "") → \(clearedFixtureIDs.count) fixture(s)")
+    }
+
+    /// Trigger a synthetic live event and broadcast it to every subscribed gRPC client.
+    /// - Parameters:
+    ///   - kind: goal | card | red | substitution | var (French aliases accepted).
+    ///   - fixtureID: specific fixture; if nil, picks today's / the next upcoming fixture.
+    ///   - team: "home" (default) or "away".
+    ///   - minute: match minute for the event; if nil, advances the clock automatically.
+    public func demoTrigger(
+        leagueID: Int,
+        season: Int,
+        kind: String,
+        fixtureID: Int? = nil,
+        team: String = "home",
+        minute: Int? = nil,
+        player: String? = nil
+    ) async throws -> DemoOutcome {
+        guard let entity = await demoResolveFixture(leagueID: leagueID, season: season, fixtureID: fixtureID) else {
+            throw Abort(.notFound, reason: "No fixture found for league \(leagueID)/\(season). Sync fixtures first, or pass fixtureId.")
+        }
+
+        let apiFixtureID = entity.apiFixtureId
+        let isHome = team.lowercased() != "away"
+
+        var state = demoStateLock.withLock { $0[apiFixtureID] ?? DemoMatchState() }
+        let elapsed = minute ?? min(max(state.minute + Int.random(in: 3...9), 1), 90)
+        state.minute = elapsed
+
+        var event = Afcon_FixtureEvent()
+        var eventTime = Afcon_EventTime()
+        eventTime.elapsed = Int32(elapsed)
+        event.time = eventTime
+        var eventTeam = Afcon_EventTeam()
+        eventTeam.id = Int32(isHome ? entity.homeTeamId : entity.awayTeamId)
+        eventTeam.name = isHome ? entity.homeTeamName : entity.awayTeamName
+        eventTeam.logo = (isHome ? entity.homeTeamLogo : entity.awayTeamLogo) ?? ""
+        event.team = eventTeam
+        var eventPlayer = Afcon_EventPlayer()
+        eventPlayer.name = player ?? "Demo Player"
+        event.player = eventPlayer
+
+        let updateEventType: String
+        switch kind.lowercased() {
+        case "goal", "but":
+            if isHome { state.homeScore += 1 } else { state.awayScore += 1 }
+            event.type = "Goal"; event.detail = "Normal Goal"
+            updateEventType = "goal"
+        case "card", "yellow", "yellow_card", "carton":
+            event.type = "Card"; event.detail = "Yellow Card"
+            updateEventType = "yellow_card"
+        case "red", "red_card":
+            event.type = "Card"; event.detail = "Red Card"
+            updateEventType = "red_card"
+        case "sub", "subst", "substitution", "remplacement":
+            event.type = "subst"; event.detail = "Substitution"
+            updateEventType = "substitution"
+        case "var":
+            event.type = "Var"; event.detail = "Goal confirmed"
+            updateEventType = "var"
+        default:
+            throw Abort(.badRequest, reason: "Unknown demo event '\(kind)'. Use goal | card | red | substitution | var.")
+        }
+
+        state.events.append(event)
+        demoStateLock.withLock { $0[apiFixtureID] = state }
+
+        // Build the fixture snapshot from the DB entity, then overlay the demo score + live status.
+        var fixture = convertFixtureEntityToFixture(entity)
+        var goals = Afcon_FixtureGoals()
+        goals.home = Int32(state.homeScore)
+        goals.away = Int32(state.awayScore)
+        fixture.goals = goals
+        var status = Afcon_FixtureStatus()
+        status.short = elapsed > 45 ? "2H" : "1H"
+        status.long = elapsed > 45 ? "Second Half" : "First Half"
+        status.elapsed = Int32(elapsed)
+        fixture.status = status
+
+        var update = Afcon_LiveMatchUpdate()
+        update.fixtureID = Int32(apiFixtureID)
+        update.timestamp = Google_Protobuf_Timestamp(date: Date())
+        update.eventType = updateEventType
+        update.fixture = fixture
+        update.event = event
+        update.status = status
+        update.recentEvents = state.events
+
+        let subscriberCount = getSubscriberCount(for: leagueID)
+        await broadcast(updates: [update], to: leagueID)
+
+        logger.info("🎬 DEMO \(updateEventType) — \(entity.homeTeamName) \(state.homeScore)-\(state.awayScore) \(entity.awayTeamName) @ \(elapsed)' → \(subscriberCount) subscriber(s)")
+
+        return DemoOutcome(
+            fixtureID: apiFixtureID,
+            homeTeam: entity.homeTeamName,
+            awayTeam: entity.awayTeamName,
+            homeScore: state.homeScore,
+            awayScore: state.awayScore,
+            minute: elapsed,
+            eventType: updateEventType,
+            detail: event.detail,
+            subscribersNotified: subscriberCount
+        )
+    }
+
+    /// Pick the fixture the demo should act on: explicit id → today's fixture → next upcoming → earliest known.
+    private func demoResolveFixture(leagueID: Int, season: Int, fixtureID: Int?) async -> FixtureEntity? {
+        if let fixtureID {
+            return try? await fixtureRepository.getFixture(byApiId: fixtureID)
+        }
+        if let today = try? await fixtureRepository.getFixturesForDate(leagueId: leagueID, season: season, date: Date()),
+           let first = today.sorted(by: { $0.timestamp < $1.timestamp }).first {
+            return first
+        }
+        if let upcoming = try? await fixtureRepository.getUpcomingFixtures(leagueId: leagueID, season: season),
+           let first = upcoming.first {
+            return first
+        }
+        let all = (try? await fixtureRepository.getAllFixtures(leagueId: leagueID, season: season)) ?? []
+        return all.sorted(by: { $0.timestamp < $1.timestamp }).first
+    }
 }
 
 // MARK: - Supporting Types
+
+/// In-memory synthetic match state for the conference-talk demo.
+private struct DemoMatchState: Sendable {
+    var homeScore: Int = 0
+    var awayScore: Int = 0
+    var minute: Int = 0
+    var events: [Afcon_FixtureEvent] = []
+}
 
 /// Information about a subscriber
 private struct SubscriberInfo: Sendable {

@@ -137,22 +137,24 @@ public func configure(_ app: Application) async throws {
         )
     }
 
-    // Register Live Match Broadcaster (centralized polling for scalability)
-    app.services.use { app -> LiveMatchBroadcaster in
-        guard let db = app.db as? any Database else {
-            fatalError("Database not configured")
-        }
-        let apiClient: APIFootballClient = app.getService()
-        let notificationService: NotificationService = app.getService()
-        let fixtureRepository = FixtureRepository(db: db, logger: app.logger)
-
-        return LiveMatchBroadcaster(
-            apiClient: apiClient,
-            fixtureRepository: fixtureRepository,
-            notificationService: notificationService,
-            logger: app.logger
-        )
+    // Register Live Match Broadcaster (centralized polling for scalability).
+    // NOTE: the service container hands back a fresh instance per `getService()` call.
+    // The broadcaster holds live subscriber state, so it MUST be a singleton — the gRPC
+    // server, the HTTP demo routes, and notification polling all have to share ONE.
+    // Build it eagerly here, stash it in app.storage, and always return that instance.
+    guard let broadcasterDB = app.db as? any Database else {
+        fatalError("Database not configured")
     }
+    let broadcasterAPIClient: APIFootballClient = app.getService()
+    let broadcasterNotificationService: NotificationService = app.getService()
+    let sharedBroadcaster = LiveMatchBroadcaster(
+        apiClient: broadcasterAPIClient,
+        fixtureRepository: FixtureRepository(db: broadcasterDB, logger: app.logger),
+        notificationService: broadcasterNotificationService,
+        logger: app.logger
+    )
+    app.storage[LiveMatchBroadcasterKey.self] = sharedBroadcaster
+    app.services.use { _ -> LiveMatchBroadcaster in sharedBroadcaster }
 
     // Register Standings Update Service
     app.services.use { app -> StandingsUpdateService in
@@ -217,6 +219,11 @@ public func configure(_ app: Application) async throws {
     // This is because Vapor and gRPC both need to run concurrently
 
     app.logger.info("✅ Application configured successfully")
+}
+
+/// Storage key for the singleton `LiveMatchBroadcaster` (see note in `configure`).
+public struct LiveMatchBroadcasterKey: StorageKey {
+    public typealias Value = LiveMatchBroadcaster
 }
 
 /// Simple service container

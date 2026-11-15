@@ -10,8 +10,12 @@ import App
 @main
 struct Main {
     static func main() async throws {
-        var env = try Environment.detect()
-        try LoggingSystem.bootstrap(from: &env)
+        let env = try Environment.detect()
+        let logLevel = Environment.get("LOG_LEVEL")
+            .flatMap { Logger.Level(rawValue: $0.lowercased()) } ?? .info
+        LoggingSystem.bootstrap { label in
+            TimestampLogHandler(label: label, logLevel: logLevel)
+        }
 
         let app = try await Application.make(env)
 
@@ -179,14 +183,18 @@ struct Main {
         }
 
         // Try to parse custom leagues from INIT_LEAGUES environment variable
-        if let initLeaguesStr = Environment.get("INIT_LEAGUES"), !initLeaguesStr.isEmpty {
+        if let rawInitLeagues = Environment.get("INIT_LEAGUES"),
+           case let initLeaguesStr = rawInitLeagues.trimmingCharacters(in: CharacterSet(charactersIn: "\"' \t")),
+           !initLeaguesStr.isEmpty {
             logger.info("ℹ️  Parsing leagues from INIT_LEAGUES environment variable")
 
             let leagueDefinitions = initLeaguesStr.split(separator: ",").map(String.init)
             var leagues: [(id: Int, season: Int, name: String)] = []
 
             for definition in leagueDefinitions {
-                let parts = definition.split(separator: ":").map(String.init)
+                let parts = definition
+                    .split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+                    .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "\"' \t")) }
 
                 guard parts.count == 3,
                       let id = Int(parts[0]),
