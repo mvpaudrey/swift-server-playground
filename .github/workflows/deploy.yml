@@ -17,6 +17,11 @@ on:
         options:
           - deploy
           - rollback
+      image_tag:
+        description: 'Rollback only: git SHA of the image to restore (empty = the most recent earlier image tagged with a SHA)'
+        required: false
+        default: ''
+        type: string
 
 env:
   AWS_REGION: eu-west-3
@@ -152,7 +157,12 @@ jobs:
           echo "⚠️ Health check did not pass, but the ECS service reported stable."
 
   # ============================================================================
-  # Rollback (Manual Trigger) - reverts to the previous task definition revision
+  # Rollback (Manual Trigger) - restores an earlier image
+  #
+  # The service runs a task definition registered outside CloudFormation and pinned to the
+  # :latest image tag, so "previous revision" is not a rollback target. Instead, move :latest
+  # back to an earlier SHA-tagged image and redeploy.
+  # Needs ecr:DescribeImages, ecr:BatchGetImage and ecr:PutImage on the repository.
   # ============================================================================
   rollback:
     name: Rollback Deployment
@@ -169,26 +179,73 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Rollback ECS service to previous revision
+      - name: Choose the image to restore
+        id: pick
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
         run: |
-          CURRENT_TASK_DEF=$(aws ecs describe-services \
-            --cluster "${{ env.ECS_CLUSTER }}" \
-            --services "${{ env.ECS_SERVICE }}" \
-            --region "${{ env.AWS_REGION }}" \
-            --query 'services[0].taskDefinition' \
-            --output text)
+          if [ -n "$INPUT_TAG" ] && ! echo "$INPUT_TAG" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "image_tag must be a full 40-character git SHA" >&2
+            exit 1
+          fi
 
-          CURRENT_REVISION=$(echo "$CURRENT_TASK_DEF" | grep -oP '\d+$')
-          PREVIOUS_REVISION=$((CURRENT_REVISION - 1))
-          TASK_FAMILY=$(echo "$CURRENT_TASK_DEF" | sed 's/:[0-9]*$//')
-          PREVIOUS_TASK_DEF="${TASK_FAMILY}:${PREVIOUS_REVISION}"
+          IMAGES=$(aws ecr describe-images \
+            --repository-name "${{ env.ECR_REPOSITORY }}" \
+            --region "${{ env.AWS_REGION }}" --output json)
 
-          echo "Rolling back from $CURRENT_TASK_DEF to $PREVIOUS_TASK_DEF"
+          CURRENT_DIGEST=$(echo "$IMAGES" | jq -r '.imageDetails[] | select((.imageTags // []) | index("latest")) | .imageDigest')
 
+          if [ -n "$INPUT_TAG" ]; then
+            TARGET="$INPUT_TAG"
+          else
+            # Newest SHA-tagged image that is not the one :latest currently points to
+            TARGET=$(echo "$IMAGES" | jq -r --arg cur "$CURRENT_DIGEST" '
+              [ .imageDetails[]
+                | select(.imageDigest != $cur)
+                | select((.imageTags // []) | map(test("^[0-9a-f]{40}$")) | any) ]
+              | sort_by(.imagePushedAt) | last // empty
+              | .imageTags[] | select(test("^[0-9a-f]{40}$"))')
+          fi
+
+          if [ -z "$TARGET" ]; then
+            echo "No earlier image tagged with a git SHA in ECR: nothing to roll back to." >&2
+            exit 1
+          fi
+
+          echo "Restoring image $TARGET"
+          echo "tag=$TARGET" >> "$GITHUB_OUTPUT"
+
+      - name: Point :latest back to that image
+        run: |
+          RESP=$(aws ecr batch-get-image \
+            --repository-name "${{ env.ECR_REPOSITORY }}" \
+            --image-ids imageTag="${{ steps.pick.outputs.tag }}" \
+            --accepted-media-types \
+              application/vnd.oci.image.index.v1+json \
+              application/vnd.oci.image.manifest.v1+json \
+              application/vnd.docker.distribution.manifest.list.v2+json \
+              application/vnd.docker.distribution.manifest.v2+json \
+            --region "${{ env.AWS_REGION }}" --output json)
+
+          MANIFEST=$(echo "$RESP" | jq -r '.images[0].imageManifest // empty')
+          MEDIA_TYPE=$(echo "$RESP" | jq -r '.images[0].imageManifestMediaType // empty')
+          if [ -z "$MANIFEST" ]; then
+            echo "Image ${{ steps.pick.outputs.tag }} not found in ECR (it may have expired)." >&2
+            exit 1
+          fi
+
+          aws ecr put-image \
+            --repository-name "${{ env.ECR_REPOSITORY }}" \
+            --image-tag latest \
+            --image-manifest "$MANIFEST" \
+            --image-manifest-media-type "$MEDIA_TYPE" \
+            --region "${{ env.AWS_REGION }}" > /dev/null
+
+      - name: Redeploy the service
+        run: |
           aws ecs update-service \
             --cluster "${{ env.ECS_CLUSTER }}" \
             --service "${{ env.ECS_SERVICE }}" \
-            --task-definition "$PREVIOUS_TASK_DEF" \
             --force-new-deployment \
             --region "${{ env.AWS_REGION }}" > /dev/null
 
@@ -199,3 +256,16 @@ jobs:
             --services "${{ env.ECS_SERVICE }}" \
             --region "${{ env.AWS_REGION }}"
           echo "Rollback stable"
+
+      - name: Verify rollback (health check)
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -fsS "http://${{ env.SERVER_DNS }}/health"; then
+              echo "Health check OK"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "Health check failed after rollback" >&2
+          exit 1
