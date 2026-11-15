@@ -23,7 +23,7 @@ env:
   ECR_REPOSITORY: production-tournament-server
   ECS_CLUSTER: production-tournament-cluster
   ECS_SERVICE: tournament-service
-  ALB_DNS: production-tournament-alb-955134668.eu-west-3.elb.amazonaws.com
+  SERVER_DNS: production-grpc-nlb-3fc4bc51bc4f783c.elb.eu-west-3.amazonaws.com
 
 jobs:
   # ============================================================================
@@ -109,7 +109,7 @@ jobs:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy')
     environment:
       name: production
-      url: http://production-tournament-alb-955134668.eu-west-3.elb.amazonaws.com
+      url: http://production-grpc-nlb-3fc4bc51bc4f783c.elb.eu-west-3.amazonaws.com
 
     steps:
       - name: Configure AWS credentials
@@ -140,9 +140,9 @@ jobs:
 
       - name: Verify deployment (health check)
         run: |
-          echo "Checking http://${{ env.ALB_DNS }}/health ..."
+          echo "Checking http://${{ env.SERVER_DNS }}/health ..."
           for i in 1 2 3 4 5; do
-            if curl -fsS "http://${{ env.ALB_DNS }}/health"; then
+            if curl -fsS "http://${{ env.SERVER_DNS }}/health"; then
               echo "Health check OK"
               exit 0
             fi

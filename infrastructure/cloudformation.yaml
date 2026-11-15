@@ -49,15 +49,6 @@ Parameters:
       - db.t4g.large
     Description: RDS PostgreSQL instance class
 
-  CacheNodeType:
-    Type: String
-    Default: cache.t4g.micro
-    AllowedValues:
-      - cache.t4g.micro
-      - cache.t4g.small
-      - cache.t4g.medium
-    Description: ElastiCache Redis node type
-
   ContainerCpu:
     Type: Number
     Default: 512
@@ -75,7 +66,7 @@ Parameters:
     Default: 1
     MinValue: 0
     MaxValue: 10
-    Description: Desired number of ECS tasks
+    Description: Desired number of ECS tasks (0 for initial deployment, then scale up after pushing Docker image)
 
   MaxCount:
     Type: Number
@@ -84,17 +75,15 @@ Parameters:
     MaxValue: 50
     Description: Maximum number of ECS tasks for auto-scaling
 
-  CertificateArn:
+  TaskDefinitionArn:
     Type: String
-    Default: ""
-    Description: (Optional) ACM Certificate ARN for HTTPS/gRPC over TLS
+    Description: Task definition revision the ECS service runs (required, no default). The service is deployed outside this stack, so always pass the revision currently in production - never let a stack update pick the TaskDefinition resource below.
 
 # ============================================================================
 # Conditions
 # ============================================================================
 Conditions:
   IsProduction: !Equals [!Ref EnvironmentName, production]
-  HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
 
 # ============================================================================
 # Resources
@@ -174,24 +163,8 @@ Resources:
         - Key: Name
           Value: !Sub ${EnvironmentName} Private Subnet (AZ2)
 
-  # NAT Gateway for outbound connectivity from private subnets
-  NatGateway1EIP:
-    Type: AWS::EC2::EIP
-    DependsOn: InternetGatewayAttachment
-    Properties:
-      Domain: vpc
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-nat-eip-az1
-
-  NatGateway1:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt NatGateway1EIP.AllocationId
-      SubnetId: !Ref PublicSubnet1
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-nat-az1
+  # No NAT Gateway: ECS tasks run in the public subnets with a public IP (inbound
+  # is still restricted by ECSSecurityGroup); private subnets only host RDS/Redis.
 
   # Route Tables
   PublicRouteTable:
@@ -230,13 +203,6 @@ Resources:
         - Key: Name
           Value: !Sub ${EnvironmentName} Private Routes (AZ1)
 
-  DefaultPrivateRoute1:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable1
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGateway1
-
   PrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -252,42 +218,12 @@ Resources:
   # ========================================
   # Security Groups
   # ========================================
-  ALBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for Application Load Balancer
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-          Description: Allow HTTP from anywhere
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-          Description: Allow HTTPS/gRPC from anywhere
-        - IpProtocol: tcp
-          FromPort: 50051
-          ToPort: 50051
-          CidrIp: 0.0.0.0/0
-          Description: Allow gRPC from anywhere
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-alb-sg
-
   ECSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Security group for ECS tasks
       VpcId: !Ref VPC
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 8080
-          ToPort: 8080
-          SourceSecurityGroupId: !Ref ALBSecurityGroup
-          Description: Allow HTTP from ALB
         - IpProtocol: tcp
           FromPort: 8080
           ToPort: 8080
@@ -316,21 +252,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-rds-sg
-
-  RedisSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for ElastiCache Redis
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 6379
-          ToPort: 6379
-          SourceSecurityGroupId: !Ref ECSSecurityGroup
-          Description: Allow Redis from ECS tasks
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-redis-sg
 
   # ========================================
   # RDS PostgreSQL Database
@@ -386,114 +307,7 @@ Resources:
           Value: !Sub ${EnvironmentName}-tournament-db
 
   # ========================================
-  # ElastiCache Redis
-  # ========================================
-  RedisSubnetGroup:
-    Type: AWS::ElastiCache::SubnetGroup
-    Properties:
-      Description: Subnet group for ElastiCache Redis
-      SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
-
-  RedisReplicationGroup:
-    Type: AWS::ElastiCache::ReplicationGroup
-    Properties:
-      ReplicationGroupId: !Sub ${EnvironmentName}-tournament-redis
-      ReplicationGroupDescription: Redis cache for AFCON server
-      Engine: redis
-      CacheNodeType: !Ref CacheNodeType
-      NumCacheClusters: 2
-      AutomaticFailoverEnabled: true
-      CacheSubnetGroupName: !Ref RedisSubnetGroup
-      SecurityGroupIds:
-        - !Ref RedisSecurityGroup
-      AtRestEncryptionEnabled: true
-      TransitEncryptionEnabled: false
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-tournament-redis
-
-  # ========================================
-  # Application Load Balancer
-  # ========================================
-  LoadBalancer:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Name: !Sub ${EnvironmentName}-tournament-alb
-      Type: application
-      Scheme: internet-facing
-      IpAddressType: ipv4
-      Subnets:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
-      SecurityGroups:
-        - !Ref ALBSecurityGroup
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-tournament-alb
-
-  # HTTP Target Group (REST API)
-  HTTPTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: !Sub ${EnvironmentName}-http-tg
-      Port: 8080
-      Protocol: HTTP
-      VpcId: !Ref VPC
-      TargetType: ip
-      HealthCheckEnabled: true
-      HealthCheckPath: /health
-      HealthCheckProtocol: HTTP
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
-      Matcher:
-        HttpCode: 200
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-http-tg
-
-  # HTTP Listener (port 80)
-  HTTPListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref LoadBalancer
-      Port: 80
-      Protocol: HTTP
-      DefaultActions:
-        - Type: !If
-            - HasCertificate
-            - redirect
-            - forward
-          RedirectConfig: !If
-            - HasCertificate
-            - Protocol: HTTPS
-              Port: '443'
-              StatusCode: HTTP_301
-            - !Ref AWS::NoValue
-          TargetGroupArn: !If
-            - HasCertificate
-            - !Ref AWS::NoValue
-            - !Ref HTTPTargetGroup
-
-  # HTTPS Listener (port 443) - for HTTPS API
-  HTTPSListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Condition: HasCertificate
-    Properties:
-      LoadBalancerArn: !Ref LoadBalancer
-      Port: 443
-      Protocol: HTTPS
-      Certificates:
-        - CertificateArn: !Ref CertificateArn
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref HTTPTargetGroup
-
-  # ========================================
-  # Network Load Balancer for gRPC
+  # Network Load Balancer (gRPC on 50051, REST on 80)
   # ========================================
   GRPCNetworkLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -502,6 +316,9 @@ Resources:
       Type: network
       Scheme: internet-facing
       IpAddressType: ipv4
+      LoadBalancerAttributes:
+        - Key: load_balancing.cross_zone.enabled
+          Value: 'true'
       Subnets:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
@@ -539,6 +356,36 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref GRPCNLBTargetGroup
+
+  # HTTP Target Group for NLB (REST API, TCP passthrough)
+  HTTPNLBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-http-nlb-tg
+      Port: 8080
+      Protocol: TCP
+      VpcId: !Ref VPC
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-http-nlb-tg
+
+  # NLB Listener for REST (port 80)
+  HTTPNLBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref GRPCNetworkLoadBalancer
+      Port: 80
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref HTTPNLBTargetGroup
 
   # ========================================
   # ECR Repository
@@ -585,7 +432,7 @@ Resources:
           Weight: 4
       ClusterSettings:
         - Name: containerInsights
-          Value: enabled
+          Value: disabled
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-tournament-cluster
@@ -613,6 +460,8 @@ Resources:
                   - !Ref DBPasswordSecret
                   - !Ref APIFootballKeySecret
                   - !Ref APNSSecret
+                  # Created out of band: full DATABASE_URL with the password URL-encoded
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${EnvironmentName}-tournament-database-url-*
 
   # ECS Task Role
   ECSTaskRole:
@@ -641,90 +490,33 @@ Resources:
       LogGroupName: !Sub /ecs/${EnvironmentName}-tournament-server
       RetentionInDays: !If [IsProduction, 30, 7]
 
-  # ECS Task Definition
-  TaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: !Sub ${EnvironmentName}-tournament-server
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      Cpu: !Ref ContainerCpu
-      Memory: !Ref ContainerMemory
-      ExecutionRoleArn: !Ref ECSTaskExecutionRole
-      TaskRoleArn: !Ref ECSTaskRole
-      ContainerDefinitions:
-        - Name: !Sub ${EnvironmentName}-tournament-server
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EnvironmentName}-tournament-server:latest
-          Essential: true
-          PortMappings:
-            - ContainerPort: 8080
-              Protocol: tcp
-            - ContainerPort: 50051
-              Protocol: tcp
-          Environment:
-            - Name: PORT
-              Value: '8080'
-            - Name: GRPC_PORT
-              Value: '50051'
-            - Name: ENVIRONMENT
-              Value: !Ref EnvironmentName
-            - Name: LOG_LEVEL
-              Value: info
-            - Name: DATABASE_URL
-              Value: !Sub
-                - 'postgres://postgres:{{resolve:secretsmanager:${SecretArn}:SecretString:password}}@${DBEndpoint}:5432/tournament?sslmode=require'
-                - SecretArn: !Ref DBPasswordSecret
-                  DBEndpoint: !GetAtt Database.Endpoint.Address
-            - Name: REDIS_URL
-              Value: !Sub 'redis://${RedisReplicationGroup.PrimaryEndPoint.Address}:6379'
-            - Name: INIT_LEAGUES
-              Value: '6:2025:AFCON 2025'
-            - Name: APNS_ENVIRONMENT
-              Value: development
-          Secrets:
-            - Name: API_FOOTBALL_KEY
-              ValueFrom: !Sub '${APIFootballKeySecret}:api_key::'
-            - Name: APNS_KEY_ID
-              ValueFrom: !Sub '${APNSSecret}:key_id::'
-            - Name: APNS_TEAM_ID
-              ValueFrom: !Sub '${APNSSecret}:team_id::'
-            - Name: APNS_TOPIC
-              ValueFrom: !Sub '${APNSSecret}:topic::'
-            - Name: APNS_KEY
-              ValueFrom: !Sub '${APNSSecret}:key::'
-
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref CloudWatchLogsGroup
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: ecs
+  # The task definition is registered outside this stack (see TaskDefinitionArn): it needs a
+  # URL-encoded DATABASE_URL injected from Secrets Manager, which CloudFormation cannot build.
 
   # ECS Service
   ECSService:
     Type: AWS::ECS::Service
     DependsOn:
-      - HTTPListener
+      - HTTPNLBListener
       - GRPCNLBListener
     Properties:
       ServiceName: tournament-service
       Cluster: !Ref ECSCluster
-      TaskDefinition: !Ref TaskDefinition
+      TaskDefinition: !Ref TaskDefinitionArn
       DesiredCount: !Ref DesiredCount
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
+          AssignPublicIp: ENABLED
           Subnets:
-            - !Ref PrivateSubnet1
-            - !Ref PrivateSubnet2
+            - !Ref PublicSubnet1
+            - !Ref PublicSubnet2
           SecurityGroups:
             - !Ref ECSSecurityGroup
       LoadBalancers:
         - ContainerName: !Sub ${EnvironmentName}-tournament-server
           ContainerPort: 8080
-          TargetGroupArn: !Ref HTTPTargetGroup
+          TargetGroupArn: !Ref HTTPNLBTargetGroup
         - ContainerName: !Sub ${EnvironmentName}-tournament-server
           ContainerPort: 50051
           TargetGroupArn: !Ref GRPCNLBTargetGroup
@@ -820,15 +612,9 @@ Resources:
 # Outputs
 # ============================================================================
 Outputs:
-  LoadBalancerDNS:
-    Description: DNS name of the Application Load Balancer
-    Value: !GetAtt LoadBalancer.DNSName
-    Export:
-      Name: !Sub ${EnvironmentName}-tournament-alb-dns
-
   HTTPEndpoint:
-    Description: HTTP REST API endpoint
-    Value: !Sub http://${LoadBalancer.DNSName}
+    Description: HTTP REST API endpoint (via Network Load Balancer)
+    Value: !Sub http://${GRPCNetworkLoadBalancer.DNSName}
     Export:
       Name: !Sub ${EnvironmentName}-tournament-http-endpoint
 
@@ -843,12 +629,6 @@ Outputs:
     Value: !GetAtt Database.Endpoint.Address
     Export:
       Name: !Sub ${EnvironmentName}-tournament-db-endpoint
-
-  RedisEndpoint:
-    Description: ElastiCache Redis primary endpoint
-    Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
-    Export:
-      Name: !Sub ${EnvironmentName}-tournament-redis-endpoint
 
   ECRRepositoryURI:
     Description: ECR repository URI for Docker images
