@@ -401,11 +401,22 @@ Resources:
           {
             "rules": [{
               "rulePriority": 1,
-              "description": "Keep last 10 images",
+              "description": "Keep last 10 tagged images (one per build: :latest and :<sha> share an image)",
               "selection": {
-                "tagStatus": "any",
+                "tagStatus": "tagged",
+                "tagPatternList": ["*"],
                 "countType": "imageCountMoreThan",
                 "countNumber": 10
+              },
+              "action": { "type": "expire" }
+            }, {
+              "rulePriority": 2,
+              "description": "Drop untagged images after 14 days (build children stay while an index references them)",
+              "selection": {
+                "tagStatus": "untagged",
+                "countType": "sinceImagePushed",
+                "countUnit": "days",
+                "countNumber": 14
               },
               "action": { "type": "expire" }
             }]
