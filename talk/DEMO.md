@@ -1,25 +1,28 @@
-# Live Demo Runbook — U-20 Women's World Cup 2026 (league 920)
+# Live Demo Runbook — any league, driven by `leagueId` + `season`
 
-End-to-end Swift demo: local Vapor/gRPC server → real API-Football data for **league 920**
-(FIFA U-20 Women's World Cup, season **2026**) → iOS app over the real gRPC stream.
+End-to-end Swift demo: local Vapor/gRPC server → real API-Football data for **one league and
+one season** → iOS app over the real gRPC stream.
 
-> **Another league?** The examples use league 920 (talk of 2026-09-08). To reuse this runbook,
-> change the league in three places: the server `.env` (`INIT_LEAGUES`, `DEMO_LEAGUE_ID`,
-> `DEMO_SEASON`), the iOS `Demo/DemoTournamentConfig.swift` (`leagueId`, `season`,
-> `competitionName`), and the ids in the `curl` / `grpcurl` commands. The fixture table below
-> is specific to the 2026-09-08 talk.
+The demo has no date window and no fixture list to maintain. Two values pick the competition:
 
-- Season 2026 window: **2026-09-05 → 2026-09-13** (events + lineups covered).
-- Talk day **2026-09-08** fixtures (UTC):
-  | kickoff | fixture id | match |
-  |---|---|---|
-  | 13:00 | `1637283` | Benin U20 W vs Argentina U20 W |
-  | 13:00 | `1637284` | Brazil U20 W vs Canada U20 W |
-  | 16:00 | `1637285` | England U20 W vs Tanzania U20 W |
-  | 16:00 | `1637286` | Poland U20 W vs Mexico U20 W |
+| value | server `.env` | iOS `Demo/DemoTournamentConfig.swift` (or scheme env) |
+|---|---|---|
+| league id | `DEMO_LEAGUE_ID` | `leagueId` (`AFCON_DEMO_LEAGUE_ID`) |
+| season | `DEMO_SEASON` | `season` (`AFCON_DEMO_SEASON`) |
 
-If the talk is ~16:00 UTC, the 16:00 matches are live during it. The synthetic trigger
-(below) is the guaranteed "goal → app updates" moment if the real match is quiet.
+They must be the same on both sides. `INIT_LEAGUES` (`<id>:<season>:<name>`) tells the server
+which league to load at startup; keep it consistent with the two values above.
+Example below: UEFA Champions League (id `2`, season `2026` = 2026-27).
+
+In the commands below, set the pair once:
+```bash
+export LEAGUE=2 SEASON=2026
+```
+
+Without a fixture id, `/demo/trigger/*` picks the league's fixture automatically: today's first
+match, else the next upcoming one, else the earliest of the season. Pass `fixtureId` only to
+target a specific match (list them with the `fixtures` call in section 1). The synthetic trigger
+is the guaranteed "goal → app updates" moment, whether or not a real match is being played.
 
 ---
 
@@ -27,8 +30,8 @@ If the talk is ~16:00 UTC, the 16:00 matches are live during it. The synthetic t
 
 Already configured in `.env`:
 ```
-INIT_LEAGUES="920:2026:U20 Women World Cup"
-DEMO_LEAGUE_ID=920
+INIT_LEAGUES="2:2026:Champions League"
+DEMO_LEAGUE_ID=2
 DEMO_SEASON=2026
 ```
 
@@ -42,8 +45,8 @@ swift run Run                        # Vapor auto-loads .env
 
 Healthy startup logs:
 ```
-✅ Configured league: U20 Women World Cup (ID: 920, Season: 2026)
-✅ Successfully initialized database with 36 fixtures for U20 Women World Cup
+✅ Configured league: Champions League (ID: 2, Season: 2026)
+✅ Successfully initialized database with <N> fixtures for Champions League
 Server started on http://127.0.0.1:8080
 gRPC server starting on 0.0.0.0:50051
 ```
@@ -61,9 +64,10 @@ then restart the server (migrations recreate everything).
 ### Sanity checks
 ```bash
 curl -s localhost:8080/health
-curl -s localhost:8080/api/v1/league/920/season/2026/fixtures | jq length      # -> 36
+curl -s localhost:8080/api/v1/league/$LEAGUE/season/$SEASON/fixtures | jq length   # > 0
+curl -s localhost:8080/api/v1/league/$LEAGUE/season/$SEASON/fixtures | jq '.[:5][] | {id: .fixture.id, date: .fixture.date}'   # fixture ids
 grpcurl -plaintext -import-path Protos -proto afcon.proto \
-  -d '{"league_id":920,"season":2026}' localhost:50051 afcon.AFCONService/GetFixtures | jq '.fixtures | length'
+  -d "{\"league_id\":$LEAGUE,\"season\":$SEASON}" localhost:50051 afcon.AFCONService/GetFixtures | jq '.fixtures | length'
 ```
 
 ---
@@ -80,7 +84,7 @@ curl -XPOST localhost:8080/demo/trigger/goal
 
 # Target a specific match + control the details
 curl -XPOST localhost:8080/demo/trigger/goal -H 'content-type: application/json' \
-  -d '{"fixtureId":1637285,"team":"away","minute":63,"player":"A. Scott"}'
+  -d '{"fixtureId":<ID>,"team":"away","minute":63,"player":"A. Scott"}'
 
 curl -XPOST localhost:8080/demo/trigger/card         -d '{"team":"home"}' -H 'content-type: application/json'
 curl -XPOST localhost:8080/demo/trigger/red          -d '{"team":"away"}' -H 'content-type: application/json'
@@ -96,7 +100,7 @@ curl -XPOST localhost:8080/demo/reset
 
 Response echoes the running score:
 ```json
-{"fixtureID":1637285,"homeTeam":"England U20 W","awayTeam":"Tanzania U20 W",
+{"fixtureID":<ID>,"homeTeam":"<home>","awayTeam":"<away>",
  "homeScore":1,"awayScore":0,"minute":23,"eventType":"goal","detail":"Normal Goal",
  "subscribersNotified":1}
 ```
@@ -106,7 +110,7 @@ stream first).
 **Watch it stream** in another terminal:
 ```bash
 grpcurl -plaintext -import-path Protos -proto afcon.proto \
-  -d '{"league_id":920,"season":2026}' localhost:50051 afcon.AFCONService/StreamLiveMatches
+  -d "{\"league_id\":$LEAGUE,\"season\":$SEASON}" localhost:50051 afcon.AFCONService/StreamLiveMatches
 ```
 
 ---
@@ -120,8 +124,10 @@ there is nothing to revert afterwards.
 
 ### One-time setup
 - *Demo ▸ Signing & Capabilities*: add the App Group `group.com.cheulah.demo` (the config uses it).
-- Set the league in `Demo/DemoTournamentConfig.swift` (`leagueId`, `season`, `competitionName`).
-  It must match the league the local server was started with.
+- League and season: defaults in `Demo/DemoTournamentConfig.swift` are `leagueId` 2 and `season`
+  2026 (Champions League). To use another competition, edit those two defaults or set
+  `AFCON_DEMO_LEAGUE_ID` / `AFCON_DEMO_SEASON` in the Demo scheme (Run ▸ Arguments ▸ Environment).
+  They must match the server's `DEMO_LEAGUE_ID` / `DEMO_SEASON`.
 - Flags: `teamFlagMap` is empty by default. Fill it (API team id → FIFA code) and add the flag
   assets to `Demo/Assets.xcassets` if you want them on screen.
 
